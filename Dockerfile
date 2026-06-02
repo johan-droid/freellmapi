@@ -34,6 +34,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 
+# Install Litestream
+ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
+RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz && rm /tmp/litestream.tar.gz
+
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/shared ./shared
@@ -41,7 +45,14 @@ COPY --from=build --chown=node:node /app/server/package.json ./server/package.js
 COPY --from=build --chown=node:node /app/server/dist ./server/dist
 COPY --from=build --chown=node:node /app/client/dist ./client/dist
 
-RUN mkdir -p /app/server/data && chown -R node:node /app/server/data
+# Copy Litestream configs
+COPY --chown=node:node litestream.yml ./litestream.yml
+COPY --chown=node:node run.sh ./run.sh
+RUN chmod +x ./run.sh
+
+# Setup database and litestream cache folders
+RUN mkdir -p /app/server/data /var/lib/litestream && \
+    chown -R node:node /app/server/data /var/lib/litestream
 
 USER node
 
@@ -51,4 +62,4 @@ VOLUME ["/app/server/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/api/ping').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"
 
-CMD ["node", "server/dist/index.js"]
+CMD ["/app/run.sh"]

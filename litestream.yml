@@ -1,0 +1,13 @@
+# Litestream configuration
+# Environment variables will be expanded at runtime by Litestream
+
+dbs:
+  - path: /app/server/data/freeapi.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: db
+        endpoint: ${LITESTREAM_ENDPOINT}
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        force-path-style: true
