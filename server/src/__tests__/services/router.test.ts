@@ -43,21 +43,24 @@ describe('Router', () => {
   it('should prefer higher-priority model when keys exist for multiple platforms', () => {
     const db = getDb();
 
+    // Setup accounts
+    db.prepare('INSERT INTO provider_accounts (provider, label) VALUES (?, ?)').run('google', 'acc1');
+    const accId1 = (db.prepare('SELECT last_insert_rowid() as id').get() as any).id;
+    db.prepare('INSERT INTO provider_accounts (provider, label) VALUES (?, ?)').run('groq', 'acc2');
+    const accId2 = (db.prepare('SELECT last_insert_rowid() as id').get() as any).id;
+
     const googleKey = encrypt('test-google-key');
     db.prepare(`
-      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1);
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, provider_account_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1, accId1);
 
     const groqKey = encrypt('test-groq-key');
     db.prepare(`
-      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('groq', 'test', groqKey.encrypted, groqKey.iv, groqKey.authTag, 'healthy', 1);
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, provider_account_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('groq', 'test', groqKey.encrypted, groqKey.iv, groqKey.authTag, 'healthy', 1, accId2);
 
-    // Post-V6: Google's gemini-3.1-pro-preview (rank 1, free-tier-eligible per
-    // probe on 2026-04-25) outranks Groq's best free-tier model openai/gpt-oss-120b
-    // (rank 6). With keys for both platforms, Google wins.
     const result = routeRequest();
     expect(result.platform).toBe('google');
   });

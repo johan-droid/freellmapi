@@ -9,6 +9,8 @@ import KeysPage from '@/pages/KeysPage'
 import PlaygroundPage from '@/pages/PlaygroundPage'
 import FallbackPage from '@/pages/FallbackPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
+import ProvidersPage from '@/pages/ProvidersPage'
+import ModelsPage from '@/pages/ModelsPage'
 
 const queryClient = new QueryClient()
 
@@ -97,7 +99,9 @@ function App() {
                   <Brand />
                   <nav className="hidden md:flex items-center gap-6">
                     <NavItem to="/playground">Playground</NavItem>
+                    <NavItem to="/providers">Providers</NavItem>
                     <NavItem to="/keys">Keys</NavItem>
+                    <NavItem to="/models">Models</NavItem>
                     <NavItem to="/fallback">Fallback</NavItem>
                     <NavItem to="/analytics">Analytics</NavItem>
                   </nav>
@@ -135,7 +139,9 @@ function App() {
               </div>
               <nav className="flex flex-col p-4 gap-2 flex-1">
                 <NavLink to="/playground" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Playground</NavLink>
+                <NavLink to="/providers" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Providers</NavLink>
                 <NavLink to="/keys" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Keys</NavLink>
+                <NavLink to="/models" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Models</NavLink>
                 <NavLink to="/fallback" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Fallback</NavLink>
                 <NavLink to="/analytics" onClick={closeMobileMenu} className={({ isActive }) => `px-4 py-3 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-secondary text-secondary-foreground' : 'hover:bg-muted'}`}>Analytics</NavLink>
               </nav>
@@ -150,7 +156,9 @@ function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/playground" replace />} />
                 <Route path="/playground" element={<PlaygroundPage />} />
+                <Route path="/providers" element={<ProvidersPage />} />
                 <Route path="/keys" element={<KeysPage />} />
+                <Route path="/models" element={<ModelsPage />} />
                 <Route path="/fallback" element={<FallbackPage />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />

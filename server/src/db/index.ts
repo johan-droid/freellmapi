@@ -56,6 +56,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV19Gemma4(db);
   migrateModelsV20KiloFree(db);
   migrateModelsV21PruneDead(db);
+  migrateDynamicProviders(db);
   ensureUnifiedKey(db);
 
   console.log(`Database initialized at ${resolvedPath}`);
@@ -80,7 +81,108 @@ function createTables(db: Database.Database) {
       context_window INTEGER,
       enabled INTEGER NOT NULL DEFAULT 1,
       supports_vision INTEGER NOT NULL DEFAULT 0,
+      discovered_source TEXT DEFAULT 'seed',
+      last_seen_at TEXT,
+      unavailable_since TEXT,
+      deprecated INTEGER DEFAULT 0,
+      dynamic INTEGER DEFAULT 0,
+      supports_tools INTEGER DEFAULT 0,
+      supports_streaming INTEGER DEFAULT 1,
       UNIQUE(platform, model_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS fallback_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model_db_id INTEGER NOT NULL REFERENCES models(id),
+      priority INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(model_db_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      email_hint TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT,
+      last_checked_at TEXT,
+      UNIQUE(provider, label)
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_account_id INTEGER NOT NULL REFERENCES provider_accounts(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      encrypted_key TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      auth_tag TEXT NOT NULL,
+      base_url TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_checked_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_model_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      model_id TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT '',
+      raw_json TEXT,
+      discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'active',
+      source TEXT NOT NULL DEFAULT 'discovery',
+      context_window INTEGER,
+      supports_vision INTEGER NOT NULL DEFAULT 0,
+      supports_tools INTEGER NOT NULL DEFAULT 0,
+      supports_streaming INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(provider, provider_account_id, model_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_quota_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      model_id TEXT,
+      rpm_limit INTEGER,
+      rpd_limit INTEGER,
+      tpm_limit INTEGER,
+      tpd_limit INTEGER,
+      monthly_token_budget INTEGER,
+      quota_scope TEXT NOT NULL DEFAULT 'credential',
+      source TEXT NOT NULL DEFAULT 'manual',
+      confidence TEXT NOT NULL DEFAULT 'medium',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(provider, model_id, quota_scope)
+    );
+
+    CREATE TABLE IF NOT EXISTS model_change_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      model_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_health_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      credential_id INTEGER,
+      model_id TEXT,
+      status TEXT NOT NULL,
+      latency_ms INTEGER,
+      error_code TEXT,
+      error_message TEXT,
+      checked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS api_keys (
@@ -93,7 +195,8 @@ function createTables(db: Database.Database) {
       status TEXT NOT NULL DEFAULT 'unknown',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      last_checked_at TEXT
+      last_checked_at TEXT,
+      provider_account_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS requests (
@@ -106,7 +209,12 @@ function createTables(db: Database.Database) {
       output_tokens INTEGER NOT NULL DEFAULT 0,
       latency_ms INTEGER NOT NULL DEFAULT 0,
       error TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      provider_account_id INTEGER,
+      credential_id INTEGER,
+      fallback_from_provider TEXT,
+      fallback_from_model_id TEXT,
+      fallback_reason TEXT
     );
 
     CREATE TABLE IF NOT EXISTS rate_limit_usage (
@@ -117,7 +225,9 @@ function createTables(db: Database.Database) {
       kind TEXT NOT NULL CHECK (kind IN ('request', 'tokens')),
       tokens INTEGER NOT NULL DEFAULT 0,
       created_at_ms INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      provider_account_id INTEGER,
+      credential_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS rate_limit_cooldowns (
@@ -126,15 +236,9 @@ function createTables(db: Database.Database) {
       key_id INTEGER NOT NULL,
       expires_at_ms INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      provider_account_id INTEGER,
+      credential_id INTEGER,
       PRIMARY KEY (platform, model_id, key_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS fallback_config (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      model_db_id INTEGER NOT NULL REFERENCES models(id),
-      priority INTEGER NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      UNIQUE(model_db_id)
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -142,7 +246,6 @@ function createTables(db: Database.Database) {
       value TEXT NOT NULL
     );
 
-    -- Dashboard accounts (email + password) gating the /api/* admin surface (#35).
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
@@ -157,13 +260,7 @@ function createTables(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-
-    CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
-    CREATE INDEX IF NOT EXISTS idx_requests_platform ON requests(platform);
-    CREATE INDEX IF NOT EXISTS idx_rate_limit_usage_lookup ON rate_limit_usage(platform, model_id, key_id, kind, created_at_ms);
-    CREATE INDEX IF NOT EXISTS idx_rate_limit_cooldowns_expires ON rate_limit_cooldowns(expires_at_ms);
-    CREATE INDEX IF NOT EXISTS idx_api_keys_platform ON api_keys(platform);
-  `);
+`);
 
   ensureRequestKeyIdColumn(db);
   ensureApiKeysBaseUrlColumn(db);
@@ -1674,4 +1771,181 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value);
+}
+
+
+export function migrateDynamicProviders(db: Database.Database) {
+  // Ensure tables exist
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS provider_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      email_hint TEXT DEFAULT NULL,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT,
+      last_checked_at TEXT,
+      UNIQUE(provider, label)
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_account_id INTEGER NOT NULL REFERENCES provider_accounts(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      encrypted_key TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      auth_tag TEXT NOT NULL,
+      base_url TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_checked_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_model_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      model_id TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT '',
+      raw_json TEXT,
+      discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'active',
+      source TEXT NOT NULL DEFAULT 'discovery',
+      context_window INTEGER,
+      supports_vision INTEGER NOT NULL DEFAULT 0,
+      supports_tools INTEGER NOT NULL DEFAULT 0,
+      supports_streaming INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(provider, provider_account_id, model_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_quota_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      model_id TEXT,
+      rpm_limit INTEGER,
+      rpd_limit INTEGER,
+      tpm_limit INTEGER,
+      tpd_limit INTEGER,
+      monthly_token_budget INTEGER,
+      quota_scope TEXT NOT NULL DEFAULT 'credential',
+      source TEXT NOT NULL DEFAULT 'manual',
+      confidence TEXT NOT NULL DEFAULT 'medium',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(provider, model_id, quota_scope)
+    );
+
+    CREATE TABLE IF NOT EXISTS model_change_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      model_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_health_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      provider_account_id INTEGER,
+      credential_id INTEGER,
+      model_id TEXT,
+      status TEXT NOT NULL,
+      latency_ms INTEGER,
+      error_code TEXT,
+      error_message TEXT,
+      checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Add columns if they don't exist
+  const addColumn = (table: string, col: string, def: string) => {
+    try {
+      db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`).run();
+    } catch (e: any) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  };
+
+  addColumn('api_keys', 'provider_account_id', 'INTEGER');
+
+  addColumn('requests', 'provider_account_id', 'INTEGER');
+  addColumn('requests', 'credential_id', 'INTEGER');
+  addColumn('requests', 'fallback_from_provider', 'TEXT');
+  addColumn('requests', 'fallback_from_model_id', 'TEXT');
+  addColumn('requests', 'fallback_reason', 'TEXT');
+
+  addColumn('rate_limit_usage', 'provider_account_id', 'INTEGER');
+  addColumn('rate_limit_usage', 'credential_id', 'INTEGER');
+
+  addColumn('rate_limit_cooldowns', 'provider_account_id', 'INTEGER');
+  addColumn('rate_limit_cooldowns', 'credential_id', 'INTEGER');
+
+  addColumn('models', 'discovered_source', "TEXT DEFAULT 'seed'");
+  addColumn('models', 'last_seen_at', 'TEXT');
+  addColumn('models', 'unavailable_since', 'TEXT');
+  addColumn('models', 'deprecated', 'INTEGER DEFAULT 0');
+  addColumn('models', 'dynamic', 'INTEGER DEFAULT 0');
+  addColumn('models', 'supports_tools', 'INTEGER DEFAULT 0');
+  addColumn('models', 'supports_streaming', 'INTEGER DEFAULT 1');
+
+  // Migrate existing api_keys to provider_accounts and provider_credentials
+  const existingKeys = db.prepare('SELECT * FROM api_keys').all() as any[];
+
+  // Ensure an account for each key
+  const getAccount = db.prepare('SELECT id FROM provider_accounts WHERE provider = ? AND label = ?');
+  const insertAccount = db.prepare('INSERT INTO provider_accounts (provider, label, enabled) VALUES (?, ?, ?)');
+
+  const insertCredential = db.prepare(`
+    INSERT INTO provider_credentials (
+      provider_account_id, provider, label, encrypted_key, iv, auth_tag, base_url, status, enabled, created_at, last_checked_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const updateApiKey = db.prepare('UPDATE api_keys SET provider_account_id = ? WHERE id = ?');
+  const getCredential = db.prepare('SELECT id FROM provider_credentials WHERE encrypted_key = ? AND iv = ?');
+
+  db.transaction(() => {
+    for (const key of existingKeys) {
+      let accountLabel = key.label || `${key.platform} Account`;
+
+      let accountRow = getAccount.get(key.platform, accountLabel) as any;
+      let accountId;
+      if (!accountRow) {
+        const info = insertAccount.run(key.platform, accountLabel, key.enabled);
+        accountId = info.lastInsertRowid;
+      } else {
+        accountId = accountRow.id;
+      }
+
+      // Link api_key to account
+      if (!key.provider_account_id) {
+        updateApiKey.run(accountId, key.id);
+      }
+
+      // Mirror credential if not exists
+      const credRow = getCredential.get(key.encrypted_key, key.iv) as any;
+      if (!credRow) {
+        insertCredential.run(
+          accountId,
+          key.platform,
+          key.label,
+          key.encrypted_key,
+          key.iv,
+          key.auth_tag,
+          key.base_url,
+          key.status,
+          key.enabled,
+          key.created_at,
+          key.last_checked_at
+        );
+      }
+    }
+  })();
 }

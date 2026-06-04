@@ -15,6 +15,9 @@ import { authRouter } from './routes/auth.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createProxyRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { discoveryRouter } from './routes/discovery.js';
+import { providersRouter } from './routes/providers.js';
+import { runModelDiscovery } from './services/modelDiscovery.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +66,8 @@ export function createApp() {
   app.use('/api/analytics', requireAuth, analyticsRouter);
   app.use('/api/health', requireAuth, healthRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
+  app.use('/api/discovery', requireAuth, discoveryRouter);
+  app.use('/api/providers', requireAuth, providersRouter);
 
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
@@ -92,5 +97,20 @@ export function createApp() {
     res.sendFile(path.join(clientDist, 'index.html'));
   });
 
+
+  // Start background discovery
+  if (process.env.MODEL_DISCOVERY_ENABLED !== 'false') {
+    const intervalMinutes = parseInt(process.env.MODEL_DISCOVERY_INTERVAL_MINUTES || '360', 10);
+    // Run an initial scan slightly after boot
+    setTimeout(() => {
+      runModelDiscovery().catch(e => console.error('[Discovery] Initial run failed:', e));
+    }, 10000);
+
+    setInterval(() => {
+      runModelDiscovery().catch(e => console.error('[Discovery] Interval run failed:', e));
+    }, intervalMinutes * 60 * 1000);
+  }
+
   return app;
+
 }

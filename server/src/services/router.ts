@@ -1,3 +1,4 @@
+import { CandidateRoute } from './scoring.js';
 import { getDb, getSetting, setSetting } from '../db/index.js';
 import { getProvider, resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
@@ -47,10 +48,10 @@ export interface RouteResult {
   modelDbId: number;
   apiKey: string;
   keyId: number;
+  providerAccountId: number | null;
+  credentialId: number | null;
   platform: string;
   displayName: string;
-  // Daily limits for this model, so a 429 handler can tell a genuine daily
-  // exhaustion (escalate the cooldown) from a transient per-minute spike.
   rpdLimit: number | null;
   tpdLimit: number | null;
 }
@@ -452,6 +453,8 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
         modelDbId: entry.model_db_id,
         apiKey: decryptedKey,
         keyId: key.id,
+        providerAccountId: (key as any).provider_account_id || null,
+        credentialId: key.id,
         platform: entry.platform,
         displayName: entry.display_name,
         rpdLimit: limits.rpd,
