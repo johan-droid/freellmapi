@@ -5,13 +5,15 @@ import type {
   Platform,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
+import type { ProviderAdapter, ProviderCredential, DiscoveredModel, ProviderQuotaProfile } from './types.js';
+
 
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
  * Covers: Groq, Cerebras, SambaNova, NVIDIA NIM, Mistral, OpenRouter,
  * GitHub Models, Fireworks AI.
  */
-export class OpenAICompatProvider extends BaseProvider {
+export class OpenAICompatProvider extends BaseProvider implements ProviderAdapter {
   readonly platform: Platform;
   readonly name: string;
   private readonly baseUrl: string;
@@ -43,6 +45,68 @@ export class OpenAICompatProvider extends BaseProvider {
   /** Keyless providers (Kilo's anonymous free tier) must send NO Authorization
    * header — a stored sentinel like `Bearer no-key` could be treated as an
    * invalid key. Everyone else sends the bearer as usual. */
+
+  // ProviderAdapter properties
+  get id(): string { return this.platform; }
+  get displayName(): string { return this.name; }
+  get openAICompatible(): boolean { return true; }
+  get supportsModelListing(): boolean { return true; }
+
+  async listModels(credential: ProviderCredential): Promise<DiscoveredModel[]> {
+    const url = credential.baseUrl || this.baseUrl;
+    const response = await this.fetchWithTimeout(url + '/models', {
+      method: 'GET',
+      headers: {
+        ...this.authHeader(credential.decryptedKey),
+        ...this.extraHeaders,
+      }
+    }, this.timeoutMs);
+
+    if (!response.ok) {
+        throw new Error('Failed to fetch ' + this.name + ' models: ' + response.statusText);
+    }
+
+    const data = await response.json() as { data: any[] };
+
+    return data.data.map((m: any) => this.normalizeModel(m)).filter((m: DiscoveredModel) => this.isFreeModel(m));
+  }
+
+  normalizeModel(raw: any): DiscoveredModel {
+    const modelId = raw.id;
+    return {
+      provider: this.platform,
+      modelId: modelId,
+      displayName: raw.name || modelId,
+      contextWindow: raw.context_length || raw.context_window || null,
+      supportsVision: !!(raw.architecture?.modality?.includes('image') || raw.vision || raw.id.toLowerCase().includes('vision')),
+      supportsTools: !!(raw.architecture?.tools || raw.tools || raw.function_calling),
+      supportsStreaming: true,
+      raw: raw
+    };
+  }
+
+  isFreeModel(model: DiscoveredModel): boolean {
+    return true;
+  }
+
+  getDefaultQuotaProfiles(): ProviderQuotaProfile[] {
+    return [
+      {
+        provider: this.platform,
+        quotaScope: 'credential',
+        source: 'default',
+        confidence: 'low',
+        rpmLimit: 10,
+        rpdLimit: 200,
+      }
+    ];
+  }
+
+  supportsCredential(credential: ProviderCredential): boolean {
+    return credential.provider === this.platform;
+  }
+
+
   private authHeader(apiKey: string): Record<string, string> {
     return this.keyless ? {} : { 'Authorization': `Bearer ${apiKey}` };
   }

@@ -240,3 +240,25 @@ analyticsRouter.get('/errors', (req: Request, res: Response) => {
     createdAt: r.created_at,
   })));
 });
+
+
+import { getProviderCapacity, getProviderDetail } from '../services/analytics.js';
+
+analyticsRouter.get('/capacity', (req: Request, res: Response) => {
+  try {
+    const capacities = getProviderCapacity();
+    res.json(capacities);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+analyticsRouter.get('/provider-detail/:provider', (req: Request, res: Response) => {
+  try {
+    const detail = getProviderDetail(req.params.provider as string);
+    if (!detail) return res.status(404).json({ error: 'Provider not found' });
+    res.json(detail);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});

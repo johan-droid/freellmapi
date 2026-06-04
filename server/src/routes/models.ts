@@ -5,6 +5,7 @@ import { hasProvider } from '../providers/index.js';
 
 export const modelsRouter = Router();
 
+
 // List all models with availability info
 modelsRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
@@ -15,15 +16,15 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     ORDER BY COALESCE(fc.priority, m.intelligence_rank) ASC
   `).all() as any[];
 
-  // Count keys per platform
-  const keyCounts = db.prepare(`
-    SELECT platform, COUNT(*) as count
-    FROM api_keys
+  // Count credentials per platform instead of legacy keys
+  const credentialCounts = db.prepare(`
+    SELECT provider as platform, COUNT(*) as count
+    FROM provider_credentials
     WHERE enabled = 1
-    GROUP BY platform
+    GROUP BY provider
   `).all() as { platform: string; count: number }[];
 
-  const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.count]));
+  const keyCountMap = new Map(credentialCounts.map(k => [k.platform, k.count]));
 
   const result = models.map(m => ({
     id: m.id,
@@ -45,6 +46,10 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     fallbackEnabled: m.fallback_enabled === 1,
     hasProvider: hasProvider(m.platform),
     keyCount: keyCountMap.get(m.platform) ?? 0,
+    dynamic: m.dynamic === 1,
+    deprecated: m.deprecated === 1,
+    lastSeenAt: m.last_seen_at,
+    discoveredSource: m.discovered_source
   }));
 
   res.json(result);

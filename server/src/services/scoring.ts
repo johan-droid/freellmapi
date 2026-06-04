@@ -1,3 +1,17 @@
+export interface CandidateRoute {
+  provider: string;
+  providerAccountId: number | null;
+  credentialId: number | null;
+  modelDbId: number;
+  modelId: string;
+  displayName: string;
+  score: number;
+  quotaRemaining?: boolean;
+  healthStatus?: string;
+  estimatedLatency?: number;
+  supportsRequestedFeatures?: boolean;
+}
+
 // ── Bandit routing score ────────────────────────────────────────────────────
 //
 // A redesign of the analytics-driven router. Instead of summing a pile of

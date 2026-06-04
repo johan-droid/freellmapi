@@ -233,3 +233,145 @@ export interface RateLimitStatus {
   available: boolean;
   nextResetAt: string | null;
 }
+
+
+// ---- Dynamic Provider Types ----
+
+export interface ProviderAccountDto {
+  id: number;
+  provider: string;
+  label: string;
+  emailHint: string | null;
+  status: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string | null;
+  lastCheckedAt: string | null;
+  credentialCount?: number;
+  activeCredentialCount?: number;
+  activeModelCount?: number;
+}
+
+export interface ProviderCredentialDto {
+  id: number;
+  providerAccountId: number;
+  provider: string;
+  label: string;
+  baseUrl: string | null;
+  status: string;
+  enabled: boolean;
+  createdAt: string;
+  lastCheckedAt: string | null;
+  maskedKeyPreview: string;
+}
+
+export interface DynamicModelDto {
+  id: number;
+  provider: string;
+  modelId: string;
+  displayName: string;
+  enabled: boolean;
+  deprecated: boolean;
+  dynamic: boolean;
+  discoveredSource: string;
+  lastSeenAt: string | null;
+  unavailableSince: string | null;
+  contextWindow: number | null;
+  supportsVision: boolean;
+  supportsTools: boolean;
+  supportsStreaming: boolean;
+  rpmLimit: number | null;
+  rpdLimit: number | null;
+  tpmLimit: number | null;
+  tpdLimit: number | null;
+  monthlyTokenBudget: number | null;
+  activeCredentialsCount?: number;
+  healthyCredentialsCount?: number;
+  totalEffectiveRpm?: number;
+  totalEffectiveRpd?: number;
+  totalEffectiveTpm?: number;
+  totalEffectiveTpd?: number;
+}
+
+export interface DiscoverySummaryDto {
+  providersChecked: number;
+  accountsChecked: number;
+  credentialsChecked: number;
+  modelsAdded: number;
+  modelsUpdated: number;
+  modelsRemoved: number;
+  modelsRestored: number;
+  quotaChanges: number;
+  metadataChanges: number;
+  errors: number;
+  startedAt: string;
+  finishedAt: string;
+}
+
+export interface ModelChangeEventDto {
+  id: number;
+  provider: string;
+  providerAccountId: number | null;
+  modelId: string;
+  eventType: string;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: string;
+}
+
+export interface QuotaProfileDto {
+  provider: string;
+  modelId: string | null;
+  rpmLimit: number | null;
+  rpdLimit: number | null;
+  tpmLimit: number | null;
+  tpdLimit: number | null;
+  monthlyTokenBudget: number | null;
+  quotaScope: 'credential' | 'provider_account' | 'provider_global' | 'model' | 'unknown';
+  source: 'manual' | 'provider_api' | 'inferred' | 'default';
+  confidence: 'high' | 'medium' | 'low';
+  updatedAt: string;
+}
+
+export interface CredentialHealthDto {
+  provider: string;
+  providerAccountId: number | null;
+  credentialId: number | null;
+  modelId: string | null;
+  status: string;
+  latencyMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  checkedAt: string;
+}
+
+export interface ProviderCapacityDto {
+  provider: string;
+  activeAccounts: number;
+  activeCredentials: number;
+  activeModels: number;
+  deprecatedModels: number;
+  newModels7d: number;
+  removedModels30d: number;
+  rpmLimitTotal: number | null;
+  rpdLimitTotal: number | null;
+  tpmLimitTotal: number | null;
+  tpdLimitTotal: number | null;
+  rpmUsedCurrentMinute: number;
+  rpdUsedToday: number;
+  tpmUsedCurrentMinute: number;
+  tpdUsedToday: number;
+  estimatedRemainingToday: number | null;
+  estimatedMonthlyBudget: number | null;
+}
+
+export interface ProviderAnalyticsDto {
+  provider: string;
+  accounts: ProviderAccountDto[];
+  credentials: ProviderCredentialDto[];
+  models: DynamicModelDto[];
+  capacity: ProviderCapacityDto;
+  usage: any; // Add more specific type if needed
+  health: CredentialHealthDto[];
+  modelChanges: ModelChangeEventDto[];
+}

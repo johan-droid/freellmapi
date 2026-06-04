@@ -342,6 +342,51 @@ Request volume, success rate, tokens in and out, average latency, and per-provid
 - **Dashboard** (`client/`) — React + Vite + shadcn/ui admin surface.
 - **Storage** — SQLite (`better-sqlite3`) with AES-256-GCM envelope encryption for keys.
 
+
+## Dynamic Model Discovery
+
+FreeLLMAPI periodically checks providers with generic OpenAI-compatible '/models' endpoints, or special adapters (e.g. OpenRouter).
+- New free models appear automatically.
+- Removed models are deprecated, not deleted.
+- Discovery can be triggered manually from the dashboard.
+- Providers without listing APIs use baseline seed data.
+
+## Multiple Accounts per Provider
+
+You can configure multiple logical accounts per provider, each with its own set of API keys.
+For example:
+- OpenRouter Account 1: email A + API key A
+- OpenRouter Account 2: email B + API key B
+- OpenRouter Account 3: email C + API key C
+- OpenRouter Account 4: email D + API key D
+
+Each account/key is treated as a separate quota pool when the provider allows it. The router rotates/falls back automatically, and analytics shows account-level and credential-level capacity.
+
+## Analytics
+
+Detailed analytics are available:
+- **RPM**: Requests per minute
+- **RPD**: Requests per day
+- **TPM**: Tokens per minute
+- **TPD**: Tokens per day
+
+Analytics are tracked per provider, per account, per credential, and per model.
+
+## Environment Variables
+
+- `MODEL_DISCOVERY_ENABLED=true`
+- `MODEL_DISCOVERY_INTERVAL_MINUTES=360`
+- `MODEL_DISCOVERY_TIMEOUT_MS=10000`
+- `MODEL_DISCOVERY_MARK_REMOVED_AFTER_HOURS=24`
+
+## Migration Safety
+
+During the upgrade to the Dynamic Provider architecture:
+- Existing keys are preserved.
+- Existing DB is migrated safely.
+- Old seed models remain as a fallback baseline.
+
+
 ## Limitations
 
 Stacking free tiers has real trade-offs. Be honest with yourself about them:
