@@ -5,7 +5,6 @@ import { hasProvider } from '../providers/index.js';
 
 export const modelsRouter = Router();
 
-
 // List all models with availability info
 modelsRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
@@ -26,6 +25,59 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
 
   const keyCountMap = new Map(credentialCounts.map(k => [k.platform, k.count]));
 
+  const providerAccounts = db.prepare(`
+    SELECT id, provider, label, email_hint, enabled, status
+    FROM provider_accounts
+  `).all() as any[];
+
+  const credentials = db.prepare(`
+    SELECT id, provider_account_id, provider, label, enabled, status
+    FROM provider_credentials
+  `).all() as any[];
+
+  // Note: we map provider_accounts and credentials
+  const accountsByProvider = new Map<string, any[]>();
+
+  for (const acc of providerAccounts) {
+    if (!accountsByProvider.has(acc.provider)) {
+      accountsByProvider.set(acc.provider, []);
+    }
+    const accCreds = credentials
+      .filter(c => c.provider_account_id === acc.id)
+      .map(c => ({
+        id: c.id,
+        label: c.label,
+        enabled: c.enabled === 1,
+        status: c.status,
+        cooldownUntil: null,
+        quota: {
+          quotaStatus: 'unknown',
+          quotaSource: 'unknown',
+          quotaConfidence: 'unknown'
+        }
+      }));
+
+    accountsByProvider.get(acc.provider)!.push({
+      id: acc.id,
+      label: acc.label,
+      emailHint: acc.email_hint,
+      enabled: acc.enabled === 1,
+      status: acc.status,
+      credentials: accCreds,
+      quota: {
+        quotaStatus: 'unknown',
+        quotaSource: 'unknown',
+        quotaConfidence: 'unknown'
+      },
+      modelAvailability: {
+        active: true,
+        lastSeenAt: null,
+        unavailableSince: null,
+        credentialIds: accCreds.map(c => c.id)
+      }
+    });
+  }
+
   const result = models.map(m => ({
     id: m.id,
     platform: m.platform,
@@ -42,14 +94,18 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
     contextWindow: m.context_window,
     enabled: m.enabled === 1,
     supportsVision: m.supports_vision === 1,
+    supportsTools: m.supports_tools === 1,
+    supportsStreaming: m.supports_streaming === 1,
     priority: m.priority,
     fallbackEnabled: m.fallback_enabled === 1,
     hasProvider: hasProvider(m.platform),
     keyCount: keyCountMap.get(m.platform) ?? 0,
     dynamic: m.dynamic === 1,
     deprecated: m.deprecated === 1,
+    discoveredSource: m.discovered_source,
     lastSeenAt: m.last_seen_at,
-    discoveredSource: m.discovered_source
+    unavailableSince: m.unavailable_since,
+    providerAccounts: accountsByProvider.get(m.platform) || []
   }));
 
   res.json(result);

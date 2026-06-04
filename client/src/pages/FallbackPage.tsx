@@ -41,6 +41,8 @@ interface FallbackEntry {
   monthlyTokenBudget: string
   supportsVision: boolean
   keyCount: number
+  credentialLabel?: string
+  providerAccountEmailHint?: string
 }
 
 type RoutingStrategy = 'priority' | 'balanced' | 'smartest' | 'fastest' | 'reliable'
@@ -246,6 +248,11 @@ function RowContent({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm">{row.displayName}</span>
           <span className="text-xs text-muted-foreground">{row.platform}</span>
+          {row.credentialLabel && (
+            <span className="text-[10px] rounded-full px-2 py-0.5 bg-muted border font-mono">
+              Key: {row.credentialLabel}
+            </span>
+          )}
           {row.supportsVision && (
             <span
               title="Accepts image input"
@@ -262,7 +269,7 @@ function RowContent({
           )}
         </div>
         <div className="text-[11px] text-muted-foreground/70 tabular-nums mt-0.5">
-          {row.monthlyTokenBudget} tok/mo
+          {row.providerAccountEmailHint && <span className="mr-2">{row.providerAccountEmailHint}</span>}{row.monthlyTokenBudget} tok/mo
           {row.rpmLimit ? ` · ${row.rpmLimit} rpm` : ''}
           {row.rpdLimit ? ` · ${row.rpdLimit} rpd` : ''}
         </div>

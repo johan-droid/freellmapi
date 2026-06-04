@@ -1,344 +1,156 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Pencil } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
+import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { PageHeader } from '@/components/page-header'
-import type { ApiKey, Platform } from '../../../shared/types'
-import { Pencil, ExternalLink } from 'lucide-react'
-import { formatSqliteUtcToLocalTime } from '@/lib/utils'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { UnifiedKeySection } from '@/components/UnifiedKeySection'
+import { CustomProviderSection } from '@/components/CustomProviderSection'
 
-// Small "Get API key" external link shown next to a provider (#137).
+// Mock registry based on old hardcoded lists. In full flow, ideally read from /api/providers
+const PLATFORMS = [
+  { value: 'openai', label: 'OpenAI', url: 'https://platform.openai.com/api-keys' },
+  { value: 'anthropic', label: 'Anthropic', url: 'https://console.anthropic.com/settings/keys' },
+  { value: 'google', label: 'Google', url: 'https://aistudio.google.com/app/apikey' },
+  { value: 'xai', label: 'xAI', url: 'https://console.x.ai/team/api-keys' },
+  { value: 'groq', label: 'Groq', url: 'https://console.groq.com/keys' },
+  { value: 'deepseek', label: 'DeepSeek', url: 'https://platform.deepseek.com/api_keys' },
+  { value: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/settings/keys' },
+  { value: 'together', label: 'Together', url: 'https://api.together.xyz/settings/api-keys' },
+  { value: 'novita', label: 'Novita', url: 'https://novita.ai/dashboard/key' },
+  { value: 'mistral', label: 'Mistral', url: 'https://console.mistral.ai/api-keys/' },
+  { value: 'fireworks', label: 'Fireworks', url: 'https://fireworks.ai/account/api-keys' },
+  { value: 'cerebras', label: 'Cerebras', url: 'https://cloud.cerebras.ai/platform/' },
+  { value: 'cohere', label: 'Cohere', url: 'https://dashboard.cohere.com/api-keys' },
+  { value: 'ai21', label: 'AI21', url: 'https://studio.ai21.com/account/api-key' },
+  { value: 'perplexity', label: 'Perplexity', url: 'https://www.perplexity.ai/settings/api' },
+  { value: 'github', label: 'GitHub Models', url: 'https://github.com/settings/tokens' },
+  { value: 'grok', label: 'Grok', url: 'https://console.x.ai/team/api-keys' },
+  { value: 'cloudflare', label: 'Cloudflare', url: 'https://dash.cloudflare.com/profile/api-tokens' },
+  { value: 'huggingface', label: 'Hugging Face', url: 'https://huggingface.co/settings/tokens' },
+  { value: 'coze', label: 'Coze', url: 'https://www.coze.com/open/api' },
+  { value: 'duckduckgo', label: 'DuckDuckGo', keyless: true, url: '' },
+  { value: 'ollama', label: 'Ollama', url: '' },
+  { value: 'koboldcpp', label: 'KoboldCPP', url: '' },
+]
+
 function GetKeyLink({ url }: { url: string }) {
   if (!url) return null
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-    >
-      Get API key
-      <ExternalLink className="size-3" />
+    <a href={url} target="_blank" rel="noreferrer" className="text-[11px] text-primary hover:underline block mt-1">
+      Get key →
     </a>
   )
 }
 
-// `url` points to each provider's key-management / signup page so the Keys page
-// can show a "Get API key" shortcut (#137). OpenCode Zen's key is free from
-// opencode.ai/auth — no card needed; billing only applies to paid models (#128).
-// `keyless: true` providers (Kilo's anonymous free tier) need no API key — the
-// form disables the key field and submits a sentinel the backend stores so
-// routing treats the platform as configured.
-const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolean }[] = [
-  { value: 'google', label: 'Google AI Studio', url: 'https://aistudio.google.com/apikey' },
-  { value: 'groq', label: 'Groq', url: 'https://console.groq.com/keys' },
-  { value: 'cerebras', label: 'Cerebras', url: 'https://cloud.cerebras.ai' },
-  { value: 'sambanova', label: 'SambaNova', url: 'https://cloud.sambanova.ai' },
-  { value: 'nvidia', label: 'NVIDIA NIM', url: 'https://build.nvidia.com/settings/api-keys' },
-  { value: 'mistral', label: 'Mistral', url: 'https://console.mistral.ai/api-keys/' },
-  { value: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/keys' },
-  { value: 'github', label: 'GitHub Models', url: 'https://github.com/settings/tokens' },
-  { value: 'cohere', label: 'Cohere', url: 'https://dashboard.cohere.com/api-keys' },
-  { value: 'cloudflare', label: 'Cloudflare Workers AI', url: 'https://dash.cloudflare.com' },
-  { value: 'zhipu', label: 'Zhipu AI (Z.ai)', url: 'https://z.ai/manage-apikey/apikey-list' },
-  { value: 'ollama', label: 'Ollama Cloud', url: 'https://ollama.com/settings/keys' },
-  { value: 'kilo', label: 'Kilo Gateway (no key needed)', url: 'https://app.kilo.ai', keyless: true },
-  { value: 'pollinations', label: 'Pollinations (anon ok)', url: 'https://pollinations.ai' },
-  { value: 'llm7', label: 'LLM7 (anon ok)', url: 'https://llm7.io' },
-  { value: 'huggingface', label: 'HuggingFace Router', url: 'https://huggingface.co/settings/tokens' },
-  { value: 'opencode', label: 'OpenCode Zen (free key)', url: 'https://opencode.ai/auth' },
-]
-
-// 'custom' is configured through its own form (base URL + model), not the
-// generic key dropdown — but it still appears in the grouped provider list.
-const CUSTOM_GROUP: { value: Platform; label: string; url: string } = {
-  value: 'custom',
-  label: 'Custom (OpenAI-compatible)',
-  url: '',
-}
-
 const statusDot: Record<string, string> = {
-  healthy: 'bg-emerald-500',
-  rate_limited: 'bg-amber-500',
-  invalid: 'bg-rose-500',
-  error: 'bg-rose-500',
-  unknown: 'bg-muted-foreground/40',
+  valid: 'bg-green-500',
+  invalid: 'bg-red-500',
+  rate_limited: 'bg-yellow-500',
+  quota_exceeded: 'bg-orange-500',
+  untested: 'bg-gray-400',
+  unknown: 'bg-gray-400',
 }
 
 const statusLabel: Record<string, string> = {
-  healthy: 'healthy',
-  rate_limited: 'rate-limited',
-  invalid: 'invalid',
-  error: 'error',
-  unknown: 'unchecked',
-}
-
-interface HealthPlatform {
-  platform: string
-  totalKeys: number
-  healthyKeys: number
-  rateLimitedKeys: number
-  invalidKeys: number
-  errorKeys: number
-  unknownKeys: number
-}
-
-interface HealthData {
-  platforms: HealthPlatform[]
-  keys: { id: number; platform: string; status: string; lastCheckedAt: string | null }[]
-}
-
-function UnifiedKeySection() {
-  const queryClient = useQueryClient()
-  const [showKey, setShowKey] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  const { data, isError } = useQuery<{ apiKey: string }>({
-    queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
-  })
-
-  const regenerate = useMutation({
-    mutationFn: () => apiFetch('/api/settings/api-key/regenerate', { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['unified-key'] }),
-  })
-
-  const apiKey = data?.apiKey ?? ''
-  const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(32) : '…'
-  const baseUrl = import.meta.env.DEV
-    ? `http://${window.location.hostname}:${__SERVER_PORT__}/v1`
-    : `${window.location.origin}/v1`
-
-  function copy() {
-    navigator.clipboard.writeText(apiKey)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  return (
-    <section className="rounded-lg border bg-card p-5">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div>
-          <h2 className="text-sm font-medium">Your unified API key</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Use this as your OpenAI <code className="font-mono">api_key</code>; it authenticates requests to this proxy.
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => regenerate.mutate()}
-          disabled={regenerate.isPending || isError}
-        >
-          Regenerate
-        </Button>
-      </div>
-
-      {isError ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
-          Can't reach the server on <code className="font-mono">{baseUrl.replace('/v1', '')}</code>. Make sure the
-          backend is running — <code className="font-mono">npm run dev</code> starts both, and the server logs print
-          under the <code className="font-mono">server</code> prefix.
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-md select-all truncate tabular-nums">
-            {showKey ? apiKey : masked}
-          </code>
-          <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)}>
-            {showKey ? 'Hide' : 'Show'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={copy}>
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-      )}
-
-      <div className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-        <span className="text-muted-foreground">Base URL</span>
-        <code className="font-mono">{baseUrl}</code>
-        <span className="text-muted-foreground">Endpoint</span>
-        <code className="font-mono">/v1/chat/completions</code>
-      </div>
-    </section>
-  )
-}
-
-function CustomProviderSection() {
-  const queryClient = useQueryClient()
-  const [baseUrl, setBaseUrl] = useState('')
-  const [model, setModel] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [apiKey, setApiKey] = useState('')
-
-  const addCustom = useMutation({
-    mutationFn: (body: { baseUrl: string; model: string; displayName?: string; apiKey?: string }) =>
-      apiFetch('/api/keys/custom', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['fallback'] })
-      queryClient.invalidateQueries({ queryKey: ['models'] })
-      setModel('')
-      setDisplayName('')
-    },
-  })
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!baseUrl || !model) return
-    addCustom.mutate({ baseUrl, model, displayName: displayName || undefined, apiKey: apiKey || undefined })
-  }
-
-  return (
-    <section>
-      <h2 className="text-sm font-medium mb-1">Add a custom OpenAI-compatible model</h2>
-      <p className="text-xs text-muted-foreground mb-3">
-        Point at any OpenAI-compatible endpoint — llama.cpp, LM Studio, vLLM, a local Ollama, or a remote
-        gateway. Add each model you want routed; they all share the one endpoint. The API key is optional
-        (most local servers don't need one).
-      </p>
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-3 rounded-lg border p-4 bg-card">
-        <div className="space-y-1.5 w-full sm:flex-1 sm:min-w-[240px]">
-          <Label className="text-xs">Base URL</Label>
-          <Input
-            value={baseUrl}
-            onChange={e => setBaseUrl(e.target.value)}
-            placeholder="http://127.0.0.1:11434/v1"
-            className="font-mono text-xs"
-          />
-        </div>
-        <div className="space-y-1.5 w-full sm:w-auto">
-          <Label className="text-xs">Model</Label>
-          <Input
-            value={model}
-            onChange={e => setModel(e.target.value)}
-            placeholder="qwen3:4b"
-            className="w-full sm:w-[180px] font-mono text-xs"
-          />
-        </div>
-        <div className="space-y-1.5 w-full sm:w-auto">
-          <Label className="text-xs">Display name</Label>
-          <Input
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            placeholder="optional"
-            className="w-full sm:w-[150px]"
-          />
-        </div>
-        <div className="space-y-1.5 w-full sm:w-auto">
-          <Label className="text-xs">API key</Label>
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="optional"
-            className="w-full sm:w-[150px] font-mono text-xs"
-          />
-        </div>
-        <Button type="submit" size="sm" className="w-full sm:w-auto" disabled={!baseUrl || !model || addCustom.isPending}>
-          {addCustom.isPending ? 'Adding…' : 'Add model'}
-        </Button>
-      </form>
-      {addCustom.isError && (
-        <p className="text-destructive text-xs mt-2">{(addCustom.error as Error).message}</p>
-      )}
-    </section>
-  )
+  valid: 'Valid',
+  invalid: 'Invalid key',
+  rate_limited: 'Rate limited',
+  quota_exceeded: 'Quota exceeded',
+  untested: 'Untested',
+  unknown: 'Unknown',
 }
 
 export default function KeysPage() {
   const queryClient = useQueryClient()
-  const [platform, setPlatform] = useState<Platform | ''>('')
-  const [apiKey, setApiKey] = useState('')
+  const [platform, setPlatform] = useState<string>('')
   const [accountId, setAccountId] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [label, setLabel] = useState('')
+  const [accountEmailHint, setAccountEmailHint] = useState('')
+
   const [editingKeyId, setEditingKeyId] = useState<number | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
 
-  const { data: keys = [], isLoading } = useQuery<ApiKey[]>({
-    queryKey: ['keys'],
-    queryFn: () => apiFetch('/api/keys'),
+  // Use new provider-accounts and provider-credentials endpoints
+  const { data: accounts = [], isLoading: isLoadingAccounts } = useQuery<any[]>({
+    queryKey: ['provider-accounts'],
+    queryFn: () => apiFetch('/api/admin/provider-accounts'),
   })
 
-  const { data: healthData } = useQuery<HealthData>({
-    queryKey: ['health'],
-    queryFn: () => apiFetch('/api/health'),
-    refetchInterval: 30000,
+  const { data: credentials = [] } = useQuery<any[]>({
+    queryKey: ['provider-credentials'],
+    queryFn: () => apiFetch('/api/admin/provider-credentials'),
   })
 
-  const addKey = useMutation({
-    mutationFn: (body: { platform: string; key: string; label?: string }) =>
-      apiFetch('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
+  // We map legacy endpoints to new provider hierarchy (this requires backend to support /provider-accounts/POST)
+  const addAccountAndKey = useMutation({
+    mutationFn: async ({ platform, key, label, emailHint }: any) => {
+      // 1. Create Account
+      const account = await apiFetch('/api/admin/provider-accounts', {
+        method: 'POST',
+        body: JSON.stringify({ provider: platform, label, emailHint, enabled: true })
+      });
+      // 2. Create Credential
+      await apiFetch(`/api/admin/provider-accounts/${(account as any).id}/credentials`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: key, label: label + ' Key' })
+      });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['fallback'] })
-      setPlatform('')
+      queryClient.invalidateQueries({ queryKey: ['provider-accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
       setApiKey('')
-      setAccountId('')
       setLabel('')
-    },
-  })
-
-  const deleteKey = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/keys/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-    },
-  })
-
-  const checkAll = useMutation({
-    mutationFn: () => apiFetch('/api/health/check-all', { method: 'POST' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      setAccountEmailHint('')
+      setAccountId('')
     },
   })
 
   const checkKey = useMutation({
-    mutationFn: (keyId: number) => apiFetch(`/api/health/check/${keyId}`, { method: 'POST' }),
+    mutationFn: (id: number) => apiFetch(`/api/admin/provider-credentials/${id}/check`, { method: 'POST' }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
     },
   })
 
-  const togglePlatform = useMutation({
-    mutationFn: ({ platform, enabled }: { platform: string; enabled: boolean }) =>
-      apiFetch(`/api/keys/platform/${platform}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled }),
-      }),
+  const deleteKey = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/admin/provider-credentials/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
     },
   })
 
   const updateKey = useMutation({
     mutationFn: ({ id, label }: { id: number; label: string }) =>
-      apiFetch(`/api/keys/${id}`, {
+      apiFetch(`/api/admin/provider-credentials/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ label }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
       setEditingKeyId(null)
       setEditingLabel('')
     },
   })
 
-  function startEditing(key: ApiKey) {
-    setEditingKeyId(key.id)
-    setEditingLabel(key.label)
+  const toggleAccount = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      apiFetch(`/api/admin/provider-accounts/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['provider-accounts'] }),
+  })
+
+  function startEditing(cred: any) {
+    setEditingKeyId(cred.id)
+    setEditingLabel(cred.label || '')
   }
 
   function cancelEditing() {
@@ -366,43 +178,34 @@ export default function KeysPage() {
     if (!platform) return
     if (!isKeyless && !apiKey) return
     if (needsAccountId && !accountId) return
-    // Keyless providers submit an empty key; the backend stores a sentinel.
     const key = isKeyless ? '' : (needsAccountId ? `${accountId}:${apiKey}` : apiKey)
-    addKey.mutate({ platform, key, label: label || undefined })
+    addAccountAndKey.mutate({ platform, key, label: label || undefined, emailHint: accountEmailHint || undefined })
   }
 
-  const healthKeyMap = new Map<number, { status: string; lastCheckedAt: string | null }>()
-  for (const k of healthData?.keys ?? []) healthKeyMap.set(k.id, k)
-
-  const grouped = [...PLATFORMS, CUSTOM_GROUP].map(p => ({
-    ...p,
-    keys: keys.filter(k => k.platform === p.value),
-  })).filter(p => p.keys.length > 0)
+  // Group accounts by provider for UI display
+  const providersMap = new Map();
+  accounts.forEach(acc => {
+    if (!providersMap.has(acc.provider)) providersMap.set(acc.provider, []);
+    providersMap.get(acc.provider).push(acc);
+  });
 
   return (
     <div>
       <PageHeader
-        title="Keys"
-        description="Provider credentials and the unified API key your apps connect with."
-        actions={
-          keys.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending}>
-              {checkAll.isPending ? 'Checking…' : 'Check all'}
-            </Button>
-          )
-        }
+        title="Provider Accounts & Credentials"
+        description="Manage your provider accounts, API keys, and routing credentials."
       />
 
-      <div className="space-y-8">
+      <div className="space-y-8 mt-4">
         <UnifiedKeySection />
 
         <section>
-          <h2 className="text-sm font-medium mb-3">Add a provider key</h2>
-          <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded-lg border p-4 bg-card">
+          <h2 className="text-sm font-medium mb-3">Add a provider credential</h2>
+          <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded-xl border p-4 bg-card/70 backdrop-blur-md">
             <div className="space-y-1.5 w-full sm:w-auto">
               <Label className="text-xs">Platform</Label>
-              <Select value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
-                <SelectTrigger className="w-full sm:w-[220px]">
+              <Select value={platform} onValueChange={(v) => setPlatform(v as string)}>
+                <SelectTrigger className="w-full sm:w-[220px] rounded-full">
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
                 <SelectContent>
@@ -416,6 +219,27 @@ export default function KeysPage() {
                 return sel?.url ? <div className="pt-0.5"><GetKeyLink url={sel.url} /></div> : null
               })()}
             </div>
+
+            <div className="space-y-1.5 w-full sm:w-auto">
+              <Label className="text-xs">Account Label</Label>
+              <Input
+                value={label}
+                onChange={e => setLabel(e.target.value)}
+                placeholder="e.g. Personal, Work"
+                className="w-full sm:w-[160px] rounded-full"
+              />
+            </div>
+
+            <div className="space-y-1.5 w-full sm:w-auto">
+              <Label className="text-xs">Email Hint</Label>
+              <Input
+                value={accountEmailHint}
+                onChange={e => setAccountEmailHint(e.target.value)}
+                placeholder="john@example.com"
+                className="w-full sm:w-[160px] rounded-full"
+              />
+            </div>
+
             {needsAccountId && (
               <div className="space-y-1.5 w-full sm:w-auto">
                 <Label className="text-xs">Account ID</Label>
@@ -423,7 +247,7 @@ export default function KeysPage() {
                   value={accountId}
                   onChange={e => setAccountId(e.target.value)}
                   placeholder="a1b2c3d4…"
-                  className="w-full sm:w-[200px] font-mono text-xs"
+                  className="w-full sm:w-[200px] font-mono text-xs rounded-full"
                 />
               </div>
             )}
@@ -434,111 +258,112 @@ export default function KeysPage() {
                 value={isKeyless ? '' : apiKey}
                 onChange={e => setApiKey(e.target.value)}
                 placeholder={isKeyless ? 'No API key needed' : (needsAccountId ? 'Bearer token' : 'paste key here')}
-                className="font-mono text-xs"
+                className="font-mono text-xs rounded-full"
                 disabled={isKeyless}
               />
-              {isKeyless && (
-                <p className="text-[11px] text-muted-foreground">
-                  No API key needed — this provider's free tier is anonymous (rate-limited per IP).
-                </p>
-              )}
             </div>
-            <div className="space-y-1.5 w-full sm:w-auto">
-              <Label className="text-xs">Label</Label>
-              <Input
-                value={label}
-                onChange={e => setLabel(e.target.value)}
-                placeholder="optional"
-                className="w-full sm:w-[160px]"
-              />
-            </div>
-            <Button type="submit" size="sm" className="w-full sm:w-auto" disabled={!platform || (!isKeyless && !apiKey) || (needsAccountId && !accountId) || addKey.isPending}>
-              {addKey.isPending ? 'Adding…' : isKeyless ? 'Enable' : 'Add key'}
+
+            <Button type="submit" size="sm" className="w-full sm:w-auto rounded-full" disabled={!platform || (!isKeyless && !apiKey) || (needsAccountId && !accountId) || addAccountAndKey.isPending}>
+              {addAccountAndKey.isPending ? 'Adding…' : isKeyless ? 'Enable' : 'Add Credential'}
             </Button>
           </form>
-          {addKey.isError && (
-            <p className="text-destructive text-xs mt-2">{(addKey.error as Error).message}</p>
+          {addAccountAndKey.isError && (
+            <p className="text-destructive text-xs mt-2">{(addAccountAndKey.error as Error).message}</p>
           )}
         </section>
 
         <CustomProviderSection />
 
         <section>
-          <h2 className="text-sm font-medium mb-3">Configured providers</h2>
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : keys.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-8 text-center">
+          <h2 className="text-sm font-medium mb-3">Configured Accounts</h2>
+          {isLoadingAccounts ? (
+            <p className="text-sm text-muted-foreground animate-pulse">Loading accounts…</p>
+          ) : accounts.length === 0 ? (
+            <div className="rounded-3xl border border-dashed p-8 text-center bg-card/50">
               <p className="text-sm text-muted-foreground">
-                No provider keys yet. Add one above to start routing.
+                No provider accounts yet. Add one above to start routing.
               </p>
             </div>
           ) : (
             <div className="space-y-6">
-              {grouped.map(group => (
-                <div key={group.value}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={group.keys.some(k => k.enabled)}
-                        onCheckedChange={(checked) =>
-                          togglePlatform.mutate({ platform: group.value, enabled: checked })
-                        }
-                        disabled={togglePlatform.isPending}
-                      />
-                      <h3 className="text-sm font-medium">{group.label}</h3>
-                      <GetKeyLink url={group.url} />
-                    </div>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {group.keys.length} key{group.keys.length === 1 ? '' : 's'}
+              {Array.from(providersMap.entries()).map(([provider, providerAccounts]) => (
+                <div key={provider} className="rounded-3xl border bg-card/70 backdrop-blur-md overflow-hidden">
+                  <div className="bg-muted/30 px-4 py-3 border-b flex items-center justify-between">
+                    <h3 className="font-semibold text-lg">{provider}</h3>
+                    <span className="text-xs text-muted-foreground">
+                      {providerAccounts.length} Account{providerAccounts.length !== 1 && 's'}
                     </span>
                   </div>
-                  <div className="rounded-lg border divide-y bg-card overflow-hidden">
-                    {group.keys.map(k => {
-                      const h = healthKeyMap.get(k.id)
-                      const status = h?.status ?? k.status
-                      const lastChecked = h?.lastCheckedAt
-                      const isEditing = editingKeyId === k.id
+
+                  <div className="divide-y divide-border/50">
+                    {providerAccounts.map((acc: any) => {
+                      const accCreds = credentials.filter(c => c.providerAccountId === acc.id);
                       return (
-                        <div key={k.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
-                          <span className={`size-1.5 rounded-full flex-shrink-0 ${statusDot[status] ?? statusDot.unknown}`} />
-                          <code className="text-xs font-mono flex-shrink-0 sm:flex-1 max-w-[200px] truncate sm:max-w-none">{k.maskedKey}</code>
-                          {isEditing ? (
-                            <Input
-                              ref={editInputRef}
-                              value={editingLabel}
-                              onChange={e => setEditingLabel(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') saveEditing(k.id)
-                                if (e.key === 'Escape') cancelEditing()
-                              }}
-                              onBlur={() => saveEditing(k.id)}
-                              className="h-8 w-full sm:w-[160px] text-xs"
-                              disabled={updateKey.isPending}
-                            />
-                          ) : (
-                            <>
-                              {k.label && <span className="text-xs text-muted-foreground">{k.label}</span>}
-                            </>
+                        <div key={acc.id} className="p-4 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Switch
+                                checked={acc.enabled}
+                                onCheckedChange={(checked) =>
+                                  toggleAccount.mutate({ id: acc.id, enabled: checked })
+                                }
+                                disabled={toggleAccount.isPending}
+                              />
+                              <div>
+                                <h4 className="font-medium text-sm">{acc.label || 'Default Account'}</h4>
+                                {acc.emailHint && <p className="text-xs text-muted-foreground">{acc.emailHint}</p>}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {accCreds.length} Credentials
+                            </div>
+                          </div>
+
+                          {/* Credentials list for this account */}
+                          {accCreds.length > 0 && (
+                            <div className="rounded-xl border bg-card overflow-hidden">
+                              {accCreds.map(k => {
+                                const status = k.status || 'unknown'
+                                const isEditing = editingKeyId === k.id
+                                return (
+                                  <div key={k.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors border-b last:border-0">
+                                    <span className={`size-2 rounded-full flex-shrink-0 ${statusDot[status] ?? statusDot.unknown}`} />
+                                    {isEditing ? (
+                                      <Input
+                                        ref={editInputRef}
+                                        value={editingLabel}
+                                        onChange={e => setEditingLabel(e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') saveEditing(k.id)
+                                          if (e.key === 'Escape') cancelEditing()
+                                        }}
+                                        onBlur={() => saveEditing(k.id)}
+                                        className="h-8 w-full sm:w-[160px] text-xs rounded-full"
+                                        disabled={updateKey.isPending}
+                                      />
+                                    ) : (
+                                      <span className="text-sm font-medium">{k.label || 'Unnamed Credential'}</span>
+                                    )}
+                                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{statusLabel[status] ?? status}</span>
+
+                                    <div className="flex-1 hidden sm:block" />
+
+                                    {!isEditing && (
+                                      <Button variant="ghost" size="sm" onClick={() => startEditing(k)} className="rounded-full">
+                                        <Pencil className="size-3" />
+                                      </Button>
+                                    )}
+                                    <Button variant="ghost" size="sm" onClick={() => checkKey.mutate(k.id)} disabled={checkKey.isPending} className="rounded-full">
+                                      Test
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive rounded-full" onClick={() => deleteKey.mutate(k.id)} disabled={deleteKey.isPending}>
+                                      Remove
+                                    </Button>
+                                  </div>
+                                )
+                              })}
+                            </div>
                           )}
-                          <span className="text-xs text-muted-foreground">{statusLabel[status] ?? status}</span>
-                          <div className="flex-1 hidden sm:block" />
-                          {lastChecked && (
-                            <span className="text-[11px] text-muted-foreground tabular-nums">
-                              {formatSqliteUtcToLocalTime(lastChecked, { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                          {!isEditing && (
-                            <Button variant="ghost" size="xs" onClick={() => startEditing(k)}>
-                              <Pencil className="size-3" />
-                            </Button>
-                          )}
-                          <Button variant="ghost" size="xs" onClick={() => checkKey.mutate(k.id)} disabled={checkKey.isPending}>
-                            Check
-                          </Button>
-                          <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" onClick={() => deleteKey.mutate(k.id)} disabled={deleteKey.isPending}>
-                            Remove
-                          </Button>
                         </div>
                       )
                     })}

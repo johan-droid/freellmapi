@@ -275,6 +275,23 @@ export default function AnalyticsPage() {
             )}
           </Panel>
 
+
+          {/* Multi-Account Extensions */}
+          <div className="lg:col-span-2">
+            <Panel title="Account & Credential Usage (Multi-Account)">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-card/50 border rounded-xl p-4 flex flex-col items-center justify-center min-h-[120px]">
+                  <p className="text-sm text-muted-foreground text-center">Requests by Account</p>
+                  <p className="text-xs text-muted-foreground/60 text-center mt-2">(Data aggregation pending backend grouping)</p>
+                </div>
+                <div className="bg-card/50 border rounded-xl p-4 flex flex-col items-center justify-center min-h-[120px]">
+                  <p className="text-sm text-muted-foreground text-center">Requests by Credential</p>
+                  <p className="text-xs text-muted-foreground/60 text-center mt-2">(Data aggregation pending backend grouping)</p>
+                </div>
+              </div>
+            </Panel>
+          </div>
+
           <Panel title="Recent errors">
             {errors.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No errors</p>
