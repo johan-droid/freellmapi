@@ -274,7 +274,7 @@ export default function PlaygroundPage() {
           </div>
           <div className="flex items-center gap-2">
             <Select value={selectedModel} onValueChange={(v) => setSelectedModel(v ?? 'auto')}>
-              <SelectTrigger className="w-[140px] sm:w-[200px] h-9 text-xs rounded-2xl bg-muted/50 border-0">
+              <SelectTrigger className="w-auto flex-1 sm:w-[200px] max-w-[180px] sm:max-w-none h-9 text-xs rounded-2xl bg-muted/50 border-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

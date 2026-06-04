@@ -452,7 +452,7 @@ export default function KeysPage() {
                 className="w-full sm:w-[160px]"
               />
             </div>
-            <Button type="submit" size="sm" disabled={!platform || (!isKeyless && !apiKey) || (needsAccountId && !accountId) || addKey.isPending}>
+            <Button type="submit" size="sm" className="w-full sm:w-auto" disabled={!platform || (!isKeyless && !apiKey) || (needsAccountId && !accountId) || addKey.isPending}>
               {addKey.isPending ? 'Adding…' : isKeyless ? 'Enable' : 'Add key'}
             </Button>
           </form>
