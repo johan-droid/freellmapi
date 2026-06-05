@@ -4,22 +4,22 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_BYTES = 32;
 
 function getMasterKey(): Buffer {
-  const raw = process.env.ENCRYPTION_MASTER_KEY;
-  if (raw) {
-    const key = Buffer.from(raw, 'base64');
+  const legacyHex = process.env.ENCRYPTION_KEY;
+  if (legacyHex && /^[0-9a-fA-F]{64}$/.test(legacyHex)) {
+    return Buffer.from(legacyHex, 'hex');
+  }
+
+  const optionalBase64 = process.env.ENCRYPTION_MASTER_KEY;
+  if (optionalBase64) {
+    const key = Buffer.from(optionalBase64, 'base64');
     if (key.length !== KEY_BYTES) {
       throw new Error(`Invalid ENCRYPTION_MASTER_KEY: expected ${KEY_BYTES} bytes after base64 decoding.`);
     }
     return key;
   }
 
-  const legacyHex = process.env.ENCRYPTION_KEY;
-  if (legacyHex && /^[0-9a-fA-F]{64}$/.test(legacyHex)) {
-    return Buffer.from(legacyHex, 'hex');
-  }
-
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('ENCRYPTION_MASTER_KEY is required in production for provider-account secret storage.');
+    throw new Error('ENCRYPTION_KEY is required in production for encrypted provider/account storage. Generate it with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   }
 
   return crypto.createHash('sha256').update('freellmapi-development-master-key').digest();
