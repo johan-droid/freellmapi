@@ -142,9 +142,12 @@ printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 npm run dev
 ```
 
-`ENCRYPTION_KEY` is required for startup. The server only falls back to a
-database-stored development key when `DEV_MODE=true` and `NODE_ENV` is not
-`production`; do not use that fallback with real provider keys.
+`ENCRYPTION_KEY` should be set to a stable 64-char hex key for any real usage.
+In non-production, the server can fall back to a database-stored development
+key, but you should not rely on that fallback for provider keys you care about.
+If you prefer to keep machine-local overrides out of Git, put the real
+`ENCRYPTION_KEY` in `.env.local`; the server now loads `.env` and `.env.local`
+with `.env.local` taking precedence.
 
 Request analytics are retained for 90 days or 100000 request rows by default,
 whichever limit prunes first. Set `REQUEST_ANALYTICS_RETENTION_DAYS=0` or

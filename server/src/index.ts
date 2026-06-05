@@ -1,7 +1,7 @@
 import { installLogRedaction } from './lib/redact.js';
 installLogRedaction();
 
-import './env.js';
+import { resolveDbPathEnv } from './env.js';
 import { createApp } from './app.js';
 import { initDb } from './db/index.js';
 import { hardenDatabase } from './db/hardening.js';
@@ -14,10 +14,19 @@ const PORT = process.env.PORT ?? 3001;
 const HOST = process.env.HOST ?? '::';
 
 async function main() {
+  const dbPath = resolveDbPathEnv();
+  if (process.env.DATABASE_PATH?.trim()) {
+    if (process.env.DB_PATH?.trim() && process.env.DB_PATH.trim() !== process.env.DATABASE_PATH.trim()) {
+      console.warn('[db] Both DB_PATH and DATABASE_PATH are set; using DB_PATH.');
+    } else if (!process.env.DB_PATH?.trim()) {
+      console.warn('[db] DATABASE_PATH is deprecated; use DB_PATH. Using DATABASE_PATH for compatibility.');
+    }
+  }
+
   // DB_PATH lets production hosts mount SQLite on persistent storage, e.g.
-  // Render disk: DB_PATH=/var/data/freeapi.db. Without it, initDb() keeps the
-  // existing local dev default from server/src/db/index.ts.
-  const db = initDb(process.env.DB_PATH);
+  // Render disk: DB_PATH=/var/data/freeapi.db. DATABASE_PATH is still accepted
+  // as a compatibility alias so older env files keep reopening the same DB.
+  const db = initDb(dbPath);
   hardenDatabase(db);
   const app = createApp();
 
