@@ -19,6 +19,35 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) {
+              return undefined
+            }
+
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'charts'
+            }
+
+            if (id.includes('@tanstack/react-query')) {
+              return 'query'
+            }
+
+            if (id.includes('react-router-dom') || id.includes('@remix-run/router')) {
+              return 'router'
+            }
+
+            if (id.includes('react') || id.includes('react-dom')) {
+              return 'react'
+            }
+
+            return 'vendor'
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         // Force IPv4 — on Windows + Node 17+, `localhost` resolves to ::1 first,
