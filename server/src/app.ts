@@ -38,19 +38,51 @@ export function createApp() {
   const app = express();
   const allowedCorsOrigins = getAllowedCorsOrigins();
 
-  // CSP intentionally disabled — the SPA bundles inline styles and the OG
-  // image is loaded from the same origin; enabling helmet's default CSP
-  // breaks the React build's hashed-asset loader. HSTS off because this is
-  // a single-user local proxy, served over HTTP on localhost. Both should
-  // stay disabled unless someone serves the proxy over HTTPS publicly
-  // (which is also not a supported deployment — see README).
-  app.use(helmet({ contentSecurityPolicy: false, hsts: false }));
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
+
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        // Tailwind/shadcn use generated style attributes/classes. Keep inline
+        // styles allowed while blocking external style origins.
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        fontSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'", ...allowedCorsOrigins],
+        upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+      },
+    },
+    hsts: process.env.NODE_ENV === 'production' ? { maxAge: 15552000, includeSubDomains: false } : false,
+    referrerPolicy: { policy: 'no-referrer' },
+    crossOriginResourcePolicy: { policy: 'same-origin' },
+  }));
+
   app.use(cors({
     origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
       callback(null, !origin || allowedCorsOrigins.has(origin));
     },
+    credentials: false,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    maxAge: 600,
   }));
-  app.use(express.json({ limit: '1mb' }));
+
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? '1mb' }));
+
+  // Never cache authenticated/admin API responses. Several endpoints expose
+  // masked credential metadata or one-time key reveals/regenerations.
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+    next();
+  });
 
   // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
   // session; everything else under /api/* requires a logged-in dashboard user.
@@ -84,7 +116,15 @@ export function createApp() {
 
   // Serve client static files (after API error handler)
   const clientDist = path.resolve(__dirname, '../../client/dist');
-  app.use(express.static(clientDist));
+  app.use(express.static(clientDist, {
+    etag: true,
+    maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
   // SPA fallback — serve index.html for non-API routes
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
