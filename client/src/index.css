@@ -124,28 +124,48 @@
 @layer base {
     * {
         @apply border-border outline-ring/50;
+        box-sizing: border-box;
     }
     html {
         @apply font-sans antialiased;
+        min-width: 320px;
+        overflow-x: hidden;
         font-feature-settings: 'ss01', 'cv11';
         text-rendering: optimizeLegibility;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
+        -webkit-text-size-adjust: 100%;
     }
     body {
         @apply bg-background text-foreground;
+        min-width: 320px;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overscroll-behavior-y: none;
         font-feature-settings: 'ss01', 'cv11', 'tnum';
+    }
+    #root {
+        min-height: 100dvh;
+        isolation: isolate;
+    }
+    a, button, [role='button'], input, textarea, select {
+        touch-action: manipulation;
+    }
+    input, textarea, select {
+        font-size: 16px;
+        font-feature-settings: 'ss01';
     }
     code, pre, kbd, samp {
         font-family: var(--font-mono);
         font-feature-settings: 'ss02', 'ss03';
     }
-    /* Tabular numerals on any element that opts in */
+    img, svg, video, canvas {
+        max-width: 100%;
+    }
+    pre, code {
+        overflow-wrap: anywhere;
+    }
     .tabular-nums {
         font-variant-numeric: tabular-nums;
-    }
-    /* Tighter focus ring across inputs */
-    input, textarea, select {
-        font-feature-settings: 'ss01';
     }
 }
