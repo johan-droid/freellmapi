@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Menu, Moon, Sun } from 'lucide-react'
@@ -13,11 +13,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { AuthGate } from '@/components/auth-gate'
 import { logout } from '@/lib/api'
-import KeysPage from '@/pages/KeysPage'
-import PlaygroundPage from '@/pages/PlaygroundPage'
-import FallbackPage from '@/pages/FallbackPage'
-import EmbeddingsPage from '@/pages/EmbeddingsPage'
-import AnalyticsPage from '@/pages/AnalyticsPage'
+
+const KeysPage = lazy(() => import('@/pages/KeysPage'))
+const PlaygroundPage = lazy(() => import('@/pages/PlaygroundPage'))
+const FallbackPage = lazy(() => import('@/pages/FallbackPage'))
+const EmbeddingsPage = lazy(() => import('@/pages/EmbeddingsPage'))
+const AnalyticsPage = lazy(() => import('@/pages/AnalyticsPage'))
 
 const queryClient = new QueryClient()
 
@@ -156,6 +157,14 @@ function Navbar() {
   )
 }
 
+function PageFallback() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+      Loading page…
+    </div>
+  )
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -164,18 +173,20 @@ function App() {
           <div className="min-h-screen bg-background">
             <Navbar />
             <main className="max-w-6xl mx-auto px-6 py-8">
-              <Routes>
-                <Route path="/" element={<Navigate to="/models/chat" replace />} />
-                <Route path="/models" element={<Navigate to="/models/chat" replace />} />
-                <Route path="/models/chat" element={<FallbackPage />} />
-                <Route path="/models/embeddings" element={<EmbeddingsPage />} />
-                <Route path="/playground" element={<PlaygroundPage />} />
-                <Route path="/keys" element={<KeysPage />} />
-                <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
-                <Route path="/analytics" element={<AnalyticsPage />} />
-                <Route path="/test" element={<Navigate to="/playground" replace />} />
-                <Route path="/health" element={<Navigate to="/keys" replace />} />
-              </Routes>
+              <Suspense fallback={<PageFallback />}>
+                <Routes>
+                  <Route path="/" element={<Navigate to="/models/chat" replace />} />
+                  <Route path="/models" element={<Navigate to="/models/chat" replace />} />
+                  <Route path="/models/chat" element={<FallbackPage />} />
+                  <Route path="/models/embeddings" element={<EmbeddingsPage />} />
+                  <Route path="/playground" element={<PlaygroundPage />} />
+                  <Route path="/keys" element={<KeysPage />} />
+                  <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
+                  <Route path="/analytics" element={<AnalyticsPage />} />
+                  <Route path="/test" element={<Navigate to="/playground" replace />} />
+                  <Route path="/health" element={<Navigate to="/keys" replace />} />
+                </Routes>
+              </Suspense>
             </main>
           </div>
         </AuthGate>
