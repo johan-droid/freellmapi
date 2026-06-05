@@ -13,6 +13,8 @@ import { analyticsRouter } from './routes/analytics.js';
 import { healthRouter } from './routes/health.js';
 import { settingsRouter } from './routes/settings.js';
 import { authRouter } from './routes/auth.js';
+import { providersRouter, providerAccountsRouter, modelDiscoveryRouter } from './routes/providers.js';
+import { storageRouter } from './routes/storage.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createProxyRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -26,7 +28,7 @@ const DEFAULT_DASHBOARD_ORIGINS = [
 ];
 
 function getAllowedCorsOrigins() {
-  const configuredOrigins = (process.env.DASHBOARD_ORIGINS ?? '')
+  const configuredOrigins = (process.env.DASHBOARD_ORIGINS ?? process.env.CORS_ORIGIN ?? process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
@@ -65,6 +67,10 @@ export function createApp() {
   app.use('/api/analytics', requireAuth, analyticsRouter);
   app.use('/api/health', requireAuth, healthRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
+  app.use('/api/providers', requireAuth, providersRouter);
+  app.use('/api/provider-accounts', requireAuth, providerAccountsRouter);
+  app.use('/api/model-discovery', requireAuth, modelDiscoveryRouter);
+  app.use('/api/storage', requireAuth, storageRouter);
 
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
