@@ -1,3 +1,6 @@
+import { installLogRedaction } from './lib/redact.js';
+installLogRedaction();
+
 import './env.js';
 import { createApp } from './app.js';
 import { initDb } from './db/index.js';
