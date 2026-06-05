@@ -2,6 +2,8 @@ import './env.js';
 import { createApp } from './app.js';
 import { initDb } from './db/index.js';
 import { startHealthChecker } from './services/health.js';
+import { getDatabasePath, restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
+import { startModelDiscoveryLoop } from './jobs/modelDiscoveryJob.js';
 
 const PORT = process.env.PORT ?? 3001;
 // Dual-stack ('::') by default so the dashboard is reachable over both IPv4
@@ -10,7 +12,9 @@ const PORT = process.env.PORT ?? 3001;
 const HOST = process.env.HOST ?? '::';
 
 async function main() {
-  initDb();
+  await restoreDatabaseBeforeBoot();
+  initDb(getDatabasePath());
+  const stopSnapshots = startDatabaseSnapshotLoop();
   const app = createApp();
 
   const onReady = (host: string) => () => {
@@ -18,9 +22,11 @@ async function main() {
     console.log(`Server running on http://${display}:${PORT}`);
     console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);
     startHealthChecker();
+    startModelDiscoveryLoop();
   };
 
   const server = app.listen(Number(PORT), HOST, onReady(HOST));
+  server.on('close', stopSnapshots);
   server.on('error', (err: NodeJS.ErrnoException) => {
     // The default '::' bind fails where IPv6 is disabled (kernel
     // ipv6.disable=1 and the like) — retry IPv4-only rather than dying.
