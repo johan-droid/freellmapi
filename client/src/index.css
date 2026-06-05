@@ -41,8 +41,6 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    /* --radius is 0.5rem, so: sm 4px · md 6px · lg 8px (buttons/inputs)
-       · xl 12px · 2xl 16px (tables/lists) · 3xl 24px (cards) · 4xl 32px */
     --radius-sm: calc(var(--radius) * 0.5);
     --radius-md: calc(var(--radius) * 0.75);
     --radius-lg: var(--radius);
@@ -124,9 +122,13 @@
 @layer base {
     * {
         @apply border-border outline-ring/50;
+        box-sizing: border-box;
     }
     html {
         @apply font-sans antialiased;
+        min-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
         font-feature-settings: 'ss01', 'cv11';
         text-rendering: optimizeLegibility;
         -webkit-font-smoothing: antialiased;
@@ -134,13 +136,25 @@
     }
     body {
         @apply bg-background text-foreground;
+        min-width: 320px;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
         font-feature-settings: 'ss01', 'cv11', 'tnum';
     }
-    /* Desktop shell (html.desktop set by the app's preload): let the
-       window's vibrancy show through a translucent backdrop so the
-       dashboard reads as real glass, like the tray popover. Cards and
-       popovers stay opaque on top. No effect in the browser, where
-       .desktop is never set. */
+    #root {
+        min-height: 100dvh;
+        overflow-x: clip;
+    }
+    main, section, article {
+        min-width: 0;
+    }
+    table {
+        width: 100%;
+    }
+    img, svg, canvas, video {
+        max-width: 100%;
+    }
     html.desktop body {
         background-color: transparent;
     }
@@ -151,12 +165,57 @@
         font-family: var(--font-mono);
         font-feature-settings: 'ss02', 'ss03';
     }
-    /* Tabular numerals on any element that opts in */
     .tabular-nums {
         font-variant-numeric: tabular-nums;
     }
-    /* Tighter focus ring across inputs */
     input, textarea, select {
         font-feature-settings: 'ss01';
+    }
+}
+
+@layer utilities {
+    .app-scroll {
+        min-height: 100dvh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    .responsive-page {
+        width: 100%;
+        max-width: 96rem;
+        margin-inline: auto;
+        padding: 1rem;
+    }
+    @media (min-width: 640px) {
+        .responsive-page {
+            padding: 1.5rem;
+        }
+    }
+    @media (min-width: 1024px) {
+        .responsive-page {
+            padding: 2rem;
+        }
+    }
+    .responsive-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+        gap: 1rem;
+    }
+    .responsive-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        padding: 0.2rem 0.55rem;
+        font-size: 0.75rem;
+        line-height: 1rem;
+        white-space: nowrap;
+        background: color-mix(in oklab, var(--card) 90%, var(--accent));
     }
 }
