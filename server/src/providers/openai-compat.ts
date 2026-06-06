@@ -47,6 +47,22 @@ export class OpenAICompatProvider extends BaseProvider {
     return this.keyless ? {} : { 'Authorization': `Bearer ${apiKey}` };
   }
 
+  private async providerError(res: Response): Promise<Error> {
+    const err = await res.json().catch(() => ({}));
+    const upstreamMessage = (err as any).error?.message ?? res.statusText;
+
+    // Some provider catalogs expose models that are not actually callable by the
+    // current free-tier key/account. HuggingFace Router commonly returns 403 for
+    // that situation. Treat these as route-level misses so the proxy's existing
+    // failover path benches this model+key and tries the next available key/model
+    // instead of returning a hard 502 to the client.
+    const retryHint = res.status === 403
+      ? ' no endpoints found / access forbidden for this key; try next route'
+      : '';
+
+    return new Error(`${this.name} API error ${res.status}: ${upstreamMessage}${retryHint}`);
+  }
+
   async chatCompletion(
     apiKey: string,
     messages: ChatMessage[],
@@ -73,8 +89,7 @@ export class OpenAICompatProvider extends BaseProvider {
     }, this.timeoutMs);
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw await this.providerError(res);
     }
 
     let data: ChatCompletionResponse;
@@ -122,8 +137,7 @@ export class OpenAICompatProvider extends BaseProvider {
     }, this.timeoutMs);
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(`${this.name} API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
+      throw await this.providerError(res);
     }
 
     const reader = res.body?.getReader();
