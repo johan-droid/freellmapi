@@ -5,6 +5,7 @@ import path from 'path';
 import { resolveDefaultDbPath } from '../env.js';
 import { initEncryptionKey } from '../lib/crypto.js';
 import { hasRemoteSecretsStore, hydrateSecretsFromRemote, hydrateSecretsToRemote, remoteSecretCounts } from '../services/remote-secrets.js';
+import { applyModelPricing } from './model-pricing.js';
 
 const DB_PATH = resolveDefaultDbPath();
 
@@ -64,6 +65,9 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV20KiloFree(db);
   migrateModelsV21PruneDead(db);
   migrateModelsV22Tools(db);
+  // After all model migrations: add/refresh paid-equivalent pricing
+  // (drives the realistic "Est. savings" analytics stat).
+  applyModelPricing(db);
   migrateEmbeddingsV1(db);
   ensureUnifiedKey(db);
 

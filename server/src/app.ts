@@ -10,9 +10,12 @@ import { responsesRouter } from './routes/responses.js';
 import { fallbackRouter } from './routes/fallback.js';
 import { embeddingsRouter } from './routes/embeddings.js';
 import { analyticsRouter } from './routes/analytics.js';
+import { analyticsExtraRouter } from './routes/analytics-extra.js';
 import { healthRouter } from './routes/health.js';
 import { settingsRouter } from './routes/settings.js';
 import { authRouter } from './routes/auth.js';
+import { providersRouter, providerAccountsRouter, modelDiscoveryRouter } from './routes/providers.js';
+import { storageRouter } from './routes/storage.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createProxyRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -26,7 +29,7 @@ const DEFAULT_DASHBOARD_ORIGINS = [
 ];
 
 function getAllowedCorsOrigins() {
-  const configuredOrigins = (process.env.DASHBOARD_ORIGINS ?? '')
+  const configuredOrigins = (process.env.DASHBOARD_ORIGINS ?? process.env.CORS_ORIGIN ?? process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
@@ -63,7 +66,6 @@ export function createApp() {
     referrerPolicy: { policy: 'no-referrer' },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   }));
-
   app.use(cors({
     origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
       callback(null, !origin || allowedCorsOrigins.has(origin));
@@ -84,38 +86,35 @@ export function createApp() {
     next();
   });
 
-  // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
-  // session; everything else under /api/* requires a logged-in dashboard user.
-  // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
   app.use('/api/auth', authRouter);
 
-  // API routes — all admin endpoints sit behind requireAuth.
   app.use('/api/keys', requireAuth, keysRouter);
   app.use('/api/models', requireAuth, modelsRouter);
   app.use('/api/fallback', requireAuth, fallbackRouter);
   app.use('/api/embeddings', requireAuth, embeddingsRouter);
   app.use('/api/analytics', requireAuth, analyticsRouter);
+  app.use('/api/analytics', requireAuth, analyticsExtraRouter);
   app.use('/api/health', requireAuth, healthRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
+  app.use('/api/providers', requireAuth, providersRouter);
+  app.use('/api/provider-accounts', requireAuth, providerAccountsRouter);
+  app.use('/api/model-discovery', requireAuth, modelDiscoveryRouter);
+  app.use('/api/storage', requireAuth, storageRouter);
 
-  // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
-  // it throttles unauthenticated brute-force / flood attempts before any
-  // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
   app.use('/v1', createProxyRateLimiter());
   app.use('/v1', proxyRouter);
-  // OpenAI Responses API shim (Codex CLI requires wire_api="responses"; see #96)
   app.use('/v1', responsesRouter);
 
-  // Health check
   app.get('/api/ping', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // Error handler (for API routes)
   app.use(errorHandler);
 
   // Serve client static files (after API error handler)
-  const clientDist = path.resolve(__dirname, '../../client/dist');
+  const clientDist = process.env.CLIENT_DIST
+    ? path.resolve(process.env.CLIENT_DIST)
+    : path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist, {
     etag: true,
     maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,

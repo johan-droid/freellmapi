@@ -69,4 +69,8 @@ export function resolveDefaultDbPath(projectRoot: string = PROJECT_ROOT): string
   return path.resolve(projectRoot, 'server', 'data', 'freeapi.db');
 }
 
+// FREEAPI_ENV_PATH lets embedders (e.g. the desktop app, where __dirname sits
+// inside a bundle) point at an explicit .env — or at nothing: dotenv silently
+// no-ops on a missing file either way.
+dotenv.config({ path: process.env.FREEAPI_ENV_PATH ?? path.resolve(__dirname, '../../.env') });
 loadProjectEnv();

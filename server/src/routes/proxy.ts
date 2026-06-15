@@ -234,6 +234,10 @@ export function isRetryableError(err: any): boolean {
     // for a model that's been pulled). Rotate to the next model in the chain —
     // setCooldown + the health checker will avoid this model on subsequent requests.
     || msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints found')
+    // 403: provider catalog/model bundle says a model exists, but this specific
+    // free-tier key/account cannot call it yet (subscription/entitlement/region
+    // mismatch). Bench this model+key and rotate instead of failing the request.
+    || msg.includes('api error 403') || msg.includes('forbidden') || msg.includes('access forbidden')
     // 400: one provider may reject parameters another accepts (e.g. max_tokens
     // limits, unsupported params). The matching pattern is "api error 400"
     // which comes from the OpenAI-compat provider's error formatting, not
