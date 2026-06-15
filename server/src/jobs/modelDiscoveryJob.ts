@@ -253,34 +253,42 @@ export async function runModelDiscoveryOnce(): Promise<{ discovered: number; acc
   const accounts = getAccountsForDiscovery();
   let discovered = 0;
   const errors: string[] = [];
+  const seenByProvider = new Map<string, Set<string>>();
+  const providerHadError = new Set<string>();
+  const successfulProviders = new Set<string>();
 
   for (const account of accounts) {
     try {
       const models = await discoverProviderModels(account);
-      const seen = new Set<string>();
+      const seen = seenByProvider.get(account.providerSlug) ?? new Set<string>();
       for (const model of models) {
         upsertDiscoveredModel(model);
         seen.add(model.provider_model_id);
         discovered += 1;
       }
-
-      if (seen.size > 0) {
-        const previous = db.prepare(`
-          SELECT provider_model_id FROM provider_catalog_models
-          WHERE provider_slug = ? AND status = 'active'
-        `).all(account.providerSlug) as { provider_model_id: string }[];
-        for (const row of previous) {
-          if (!seen.has(row.provider_model_id)) {
-            db.prepare(`
-              UPDATE provider_catalog_models
-              SET status = 'inactive', removed_at = datetime('now'), updated_at = datetime('now')
-              WHERE provider_slug = ? AND provider_model_id = ?
-            `).run(account.providerSlug, row.provider_model_id);
-          }
-        }
-      }
+      seenByProvider.set(account.providerSlug, seen);
+      successfulProviders.add(account.providerSlug);
     } catch (error) {
+      providerHadError.add(account.providerSlug);
       errors.push(`${account.providerSlug}/${account.id}: ${(error as Error).message}`);
+    }
+  }
+
+  for (const providerSlug of successfulProviders) {
+    if (providerHadError.has(providerSlug)) continue;
+    const seen = seenByProvider.get(providerSlug) ?? new Set<string>();
+    const previous = db.prepare(`
+      SELECT provider_model_id FROM provider_catalog_models
+      WHERE provider_slug = ? AND status = 'active'
+    `).all(providerSlug) as { provider_model_id: string }[];
+    for (const row of previous) {
+      if (!seen.has(row.provider_model_id)) {
+        db.prepare(`
+          UPDATE provider_catalog_models
+          SET status = 'inactive', removed_at = datetime('now'), updated_at = datetime('now')
+          WHERE provider_slug = ? AND provider_model_id = ?
+        `).run(providerSlug, row.provider_model_id);
+      }
     }
   }
 

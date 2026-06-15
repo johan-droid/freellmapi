@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveDefaultDbPath } from '../env.js';
 import { initEncryptionKey } from '../lib/crypto.js';
-import { hasRemoteSecretsStore, hydrateSecretsFromRemote, hydrateSecretsToRemote, remoteSecretCounts } from '../services/remote-secrets.js';
+import { hasRemoteSecretsStore, hydrateSecretsFromRemote, hydrateSecretsToRemote, remoteSecretCounts, scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 import { applyModelPricing } from './model-pricing.js';
 import { ensurePersistenceSchema } from './persistence-schema.js';
 
@@ -74,7 +74,7 @@ export function initDb(dbPath?: string): Database.Database {
   ensureUnifiedKey(db);
 
   if (hasRemoteSecretsStore()) {
-    hydrateSecretsToRemote(db);
+    scheduleHydrateSecretsToRemote(db);
     console.log('[db] Mirrored secret state to remote Postgres/Neon.');
   }
 
@@ -1803,7 +1803,7 @@ export function regenerateUnifiedKey(): string {
   const db = getDb();
   const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
   db.prepare("UPDATE settings SET value = ? WHERE key = 'unified_api_key'").run(key);
-  hydrateSecretsToRemote(db);
+  scheduleHydrateSecretsToRemote(db);
   return key;
 }
 
@@ -1820,5 +1820,5 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value);
-  hydrateSecretsToRemote(db);
+  scheduleHydrateSecretsToRemote(db);
 }

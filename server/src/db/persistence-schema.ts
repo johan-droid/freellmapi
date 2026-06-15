@@ -16,6 +16,7 @@ export function ensurePersistenceSchema(db: Database.Database): void {
       key_iv TEXT NOT NULL,
       key_auth_tag TEXT NOT NULL,
       key_hint TEXT,
+      linked_api_key_id INTEGER,
       status TEXT NOT NULL DEFAULT 'active',
       base_url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -245,6 +246,9 @@ export function ensurePersistenceSchema(db: Database.Database): void {
   // Non-destructive compatibility migrations for databases created before this table grew.
   if (!hasColumn(db, 'provider_accounts', 'base_url')) {
     db.prepare('ALTER TABLE provider_accounts ADD COLUMN base_url TEXT').run();
+  }
+  if (!hasColumn(db, 'provider_accounts', 'linked_api_key_id')) {
+    db.prepare('ALTER TABLE provider_accounts ADD COLUMN linked_api_key_id INTEGER').run();
   }
   if (!hasColumn(db, 'provider_catalog_models', 'last_seen_at')) {
     db.prepare('ALTER TABLE provider_catalog_models ADD COLUMN last_seen_at TEXT').run();

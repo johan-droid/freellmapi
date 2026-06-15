@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import type Database from 'better-sqlite3';
 import { resolveDatabaseUrlEnv } from '../env.js';
 
@@ -21,6 +21,9 @@ type SecretSnapshot = {
   settings: SecretSetting[];
   apiKeys: SecretKey[];
 };
+
+let pendingPushSnapshot: SecretSnapshot | null = null;
+let pushInFlight = false;
 
 function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSnapshot): any {
   const databaseUrl = resolveDatabaseUrlEnv();
@@ -158,6 +161,157 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
   return stdout ? JSON.parse(stdout) : null;
 }
 
+async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload?: SecretSnapshot): Promise<any> {
+  const databaseUrl = resolveDatabaseUrlEnv();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const script = `
+    import { Pool } from 'pg';
+
+    const action = process.argv[1];
+    const env = process.env;
+    const rawInput = await new Promise((resolve, reject) => {
+      let data = '';
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', chunk => data += chunk);
+      process.stdin.on('end', () => resolve(data));
+      process.stdin.on('error', reject);
+    });
+    const input = rawInput ? JSON.parse(rawInput) : {};
+
+    const pool = new Pool({
+      connectionString: env.DATABASE_URL,
+      ssl: env.DATABASE_SSL === 'disable'
+        ? undefined
+        : { rejectUnauthorized: env.DATABASE_SSL === 'strict' },
+    });
+
+    async function ensureSchema() {
+      await pool.query(\`
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      \`);
+      await pool.query(\`
+        CREATE TABLE IF NOT EXISTS api_keys (
+          id INTEGER PRIMARY KEY,
+          platform TEXT NOT NULL,
+          label TEXT NOT NULL DEFAULT '',
+          encrypted_key TEXT NOT NULL,
+          iv TEXT NOT NULL,
+          auth_tag TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unknown',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+          last_checked_at TEXT,
+          base_url TEXT
+        )
+      \`);
+    }
+
+    async function pull() {
+      await ensureSchema();
+      const [settings, apiKeys] = await Promise.all([
+        pool.query('SELECT key, value FROM settings ORDER BY key'),
+        pool.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url FROM api_keys ORDER BY id'),
+      ]);
+      console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows }));
+    }
+
+    async function push() {
+      await ensureSchema();
+      await pool.query('BEGIN');
+      try {
+        for (const row of input.settings ?? []) {
+          await pool.query(\`
+            INSERT INTO settings (key, value) VALUES ($1, $2)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+          \`, [row.key, row.value]);
+        }
+        for (const row of input.apiKeys ?? []) {
+          await pool.query(\`
+            INSERT INTO api_keys
+              (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url)
+            VALUES
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (id) DO UPDATE SET
+              platform = EXCLUDED.platform,
+              label = EXCLUDED.label,
+              encrypted_key = EXCLUDED.encrypted_key,
+              iv = EXCLUDED.iv,
+              auth_tag = EXCLUDED.auth_tag,
+              status = EXCLUDED.status,
+              enabled = EXCLUDED.enabled,
+              created_at = EXCLUDED.created_at,
+              last_checked_at = EXCLUDED.last_checked_at,
+              base_url = EXCLUDED.base_url
+          \`, [
+            row.id, row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag,
+            row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url,
+          ]);
+        }
+        await pool.query('COMMIT');
+        console.log(JSON.stringify({ ok: true }));
+      } catch (err) {
+        await pool.query('ROLLBACK');
+        throw err;
+      } finally {
+        await pool.end();
+      }
+    }
+
+    async function status() {
+      await ensureSchema();
+      const [settings, apiKeys] = await Promise.all([
+        pool.query('SELECT COUNT(*)::int AS count FROM settings'),
+        pool.query('SELECT COUNT(*)::int AS count FROM api_keys'),
+      ]);
+      console.log(JSON.stringify({ settings: settings.rows[0].count, apiKeys: apiKeys.rows[0].count }));
+    }
+
+    try {
+      if (action === 'pull') await pull();
+      else if (action === 'push') await push();
+      else await status();
+    } finally {
+      if (action !== 'push') await pool.end().catch(() => {});
+    }
+  `;
+
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, action], {
+    env: process.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  if (payload) {
+    child.stdin.write(JSON.stringify(payload));
+  }
+  child.stdin.end();
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => resolve(code ?? 0));
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(`Remote secret sync failed (${action}): ${stderr.trim() || 'unknown error'}`);
+  }
+
+  const trimmed = stdout.trim();
+  return trimmed ? JSON.parse(trimmed) : null;
+}
+
 export function hasRemoteSecretsStore(): boolean {
   return !!resolveDatabaseUrlEnv();
 }
@@ -218,6 +372,37 @@ export function hydrateSecretsFromRemote(db: Database.Database): boolean {
 export function hydrateSecretsToRemote(db: Database.Database): boolean {
   if (!hasRemoteSecretsStore()) return false;
   runRemoteCommand('push', readLocalSecretSnapshot(db));
+  return true;
+}
+
+async function flushQueuedRemotePushes(): Promise<void> {
+  if (pushInFlight || !pendingPushSnapshot) return;
+
+  pushInFlight = true;
+  try {
+    while (pendingPushSnapshot) {
+      const snapshot = pendingPushSnapshot;
+      pendingPushSnapshot = null;
+      await runRemoteCommandAsync('push', snapshot);
+    }
+  } catch (error) {
+    console.warn(`[remote-secrets] Async push failed: ${(error as Error).message}`);
+  } finally {
+    pushInFlight = false;
+    if (pendingPushSnapshot) {
+      queueMicrotask(() => {
+        void flushQueuedRemotePushes();
+      });
+    }
+  }
+}
+
+export function scheduleHydrateSecretsToRemote(db: Database.Database): boolean {
+  if (!hasRemoteSecretsStore()) return false;
+  pendingPushSnapshot = readLocalSecretSnapshot(db);
+  queueMicrotask(() => {
+    void flushQueuedRemotePushes();
+  });
   return true;
 }
 

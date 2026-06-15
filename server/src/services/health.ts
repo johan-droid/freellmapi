@@ -1,7 +1,7 @@
 import { getDb } from '../db/index.js';
 import { resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
-import { hydrateSecretsToRemote } from './remote-secrets.js';
+import { scheduleHydrateSecretsToRemote } from './remote-secrets.js';
 import type { Platform, KeyStatus } from '@freellmapi/shared/types.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -70,7 +70,7 @@ export async function checkAllKeys(): Promise<void> {
     await checkKeyHealth(key.id);
   }
 
-  hydrateSecretsToRemote(db);
+  scheduleHydrateSecretsToRemote(db);
 
   console.log(`[Health] Check complete.`);
 }

@@ -7,6 +7,7 @@ import { ensurePersistenceSchema } from '../db/persistence-schema.js';
 import { PROVIDER_REGISTRY, getProviderRegistryEntry } from '../providers/registry.js';
 import { encryptSecret, maskSecret } from '../security/secrets.js';
 import { runModelDiscoveryOnce } from '../jobs/modelDiscoveryJob.js';
+import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 
 export const providersRouter = Router();
 export const providerAccountsRouter = Router();
@@ -18,6 +19,44 @@ function idFor(...parts: string[]): string {
 
 function ensureSchema() {
   ensurePersistenceSchema(getDb());
+}
+
+function syncLinkedApiKey(
+  providerAccountId: string,
+  providerSlug: string,
+  displayName: string,
+  encryptedApiKey: string,
+  keyIv: string,
+  keyAuthTag: string,
+  status: 'active' | 'disabled' | 'deleted',
+  baseUrl: string | null,
+): number | null {
+  const db = getDb();
+  const existing = db.prepare('SELECT linked_api_key_id FROM provider_accounts WHERE id = ?').get(providerAccountId) as { linked_api_key_id: number | null } | undefined;
+  const enabled = status === 'active' ? 1 : 0;
+
+  if (status === 'deleted') {
+    if (existing?.linked_api_key_id) {
+      db.prepare('DELETE FROM api_keys WHERE id = ?').run(existing.linked_api_key_id);
+    }
+    return null;
+  }
+
+  if (existing?.linked_api_key_id) {
+    db.prepare(`
+      UPDATE api_keys
+      SET platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?,
+          status = 'unknown', enabled = ?, base_url = ?
+      WHERE id = ?
+    `).run(providerSlug, displayName, encryptedApiKey, keyIv, keyAuthTag, enabled, baseUrl, existing.linked_api_key_id);
+    return existing.linked_api_key_id;
+  }
+
+  const result = db.prepare(`
+    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
+    VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?)
+  `).run(providerSlug, displayName, encryptedApiKey, keyIv, keyAuthTag, enabled, baseUrl);
+  return Number(result.lastInsertRowid);
 }
 
 providersRouter.get('/', (_req: Request, res: Response) => {
@@ -93,7 +132,7 @@ const providerAccountSchema = z.object({
 providerAccountsRouter.get('/', (_req: Request, res: Response) => {
   ensureSchema();
   const rows = getDb().prepare(`
-    SELECT id, provider_slug, display_name, account_email, key_hint, status, base_url, created_at, updated_at
+    SELECT id, provider_slug, display_name, account_email, key_hint, linked_api_key_id, status, base_url, created_at, updated_at
     FROM provider_accounts
     WHERE status != 'deleted'
     ORDER BY provider_slug ASC, created_at DESC
@@ -104,6 +143,7 @@ providerAccountsRouter.get('/', (_req: Request, res: Response) => {
     displayName: row.display_name,
     accountEmail: row.account_email,
     keyHint: row.key_hint,
+    linkedApiKeyId: row.linked_api_key_id,
     status: row.status,
     baseUrl: row.base_url,
     createdAt: row.created_at,
@@ -127,10 +167,21 @@ providerAccountsRouter.post('/', (req: Request, res: Response) => {
 
   const encrypted = encryptSecret(parsed.data.apiKey.trim());
   const id = crypto.randomUUID();
-  getDb().prepare(`
+  const db = getDb();
+  const linkedApiKeyId = syncLinkedApiKey(
+    id,
+    parsed.data.providerSlug,
+    parsed.data.displayName ?? `${registry.displayName} account`,
+    encrypted.encrypted,
+    encrypted.iv,
+    encrypted.authTag,
+    'active',
+    parsed.data.baseUrl ?? null,
+  );
+  db.prepare(`
     INSERT INTO provider_accounts (
-      id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, status, base_url, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, datetime('now'))
+      id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, datetime('now'))
   `).run(
     id,
     parsed.data.providerSlug,
@@ -140,8 +191,10 @@ providerAccountsRouter.post('/', (req: Request, res: Response) => {
     encrypted.iv,
     encrypted.authTag,
     encrypted.hint,
+    linkedApiKeyId,
     parsed.data.baseUrl ?? null,
   );
+  scheduleHydrateSecretsToRemote(db);
 
   res.status(201).json({
     id,
@@ -170,39 +223,78 @@ providerAccountsRouter.patch('/:id', (req: Request, res: Response) => {
     return;
   }
 
+  const db = getDb();
+  const accountId = String(req.params.id);
+  const current = db.prepare(`
+    SELECT provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url
+    FROM provider_accounts
+    WHERE id = ?
+  `).get(accountId) as any | undefined;
+  if (!current) {
+    res.status(404).json({ error: { message: 'Provider account not found' } });
+    return;
+  }
+
   const updates: string[] = [];
   const values: unknown[] = [];
+  const nextDisplayName = parsed.data.displayName ?? current.display_name;
+  const nextStatus = parsed.data.status ?? current.status;
+  const nextBaseUrl = parsed.data.baseUrl !== undefined ? parsed.data.baseUrl : current.base_url;
+  const nextEncrypted = parsed.data.apiKey !== undefined ? encryptSecret(parsed.data.apiKey.trim()) : {
+    encrypted: current.encrypted_api_key,
+    iv: current.key_iv,
+    authTag: current.key_auth_tag,
+    hint: current.key_hint,
+  };
+
   if (parsed.data.displayName !== undefined) { updates.push('display_name = ?'); values.push(parsed.data.displayName); }
   if (parsed.data.accountEmail !== undefined) { updates.push('account_email = ?'); values.push(parsed.data.accountEmail); }
   if (parsed.data.status !== undefined) { updates.push('status = ?'); values.push(parsed.data.status); }
   if (parsed.data.baseUrl !== undefined) { updates.push('base_url = ?'); values.push(parsed.data.baseUrl); }
   if (parsed.data.apiKey !== undefined) {
-    const encrypted = encryptSecret(parsed.data.apiKey.trim());
     updates.push('encrypted_api_key = ?', 'key_iv = ?', 'key_auth_tag = ?', 'key_hint = ?');
-    values.push(encrypted.encrypted, encrypted.iv, encrypted.authTag, encrypted.hint);
+    values.push(nextEncrypted.encrypted, nextEncrypted.iv, nextEncrypted.authTag, nextEncrypted.hint);
   }
   if (updates.length === 0) {
     res.status(400).json({ error: { message: 'No update fields provided' } });
     return;
   }
+  const linkedApiKeyId = syncLinkedApiKey(
+    accountId,
+    current.provider_slug,
+    nextDisplayName,
+    nextEncrypted.encrypted,
+    nextEncrypted.iv,
+    nextEncrypted.authTag,
+    nextStatus,
+    nextBaseUrl ?? null,
+  );
+  updates.push('linked_api_key_id = ?');
+  values.push(linkedApiKeyId);
   updates.push('updated_at = datetime(\'now\')');
-  values.push(req.params.id);
+  values.push(accountId);
 
-  const result = getDb().prepare(`UPDATE provider_accounts SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  if (result.changes === 0) {
-    res.status(404).json({ error: { message: 'Provider account not found' } });
-    return;
-  }
+  db.prepare(`UPDATE provider_accounts SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  scheduleHydrateSecretsToRemote(db);
   res.json({ success: true });
 });
 
 providerAccountsRouter.delete('/:id', (req: Request, res: Response) => {
   ensureSchema();
-  const result = getDb().prepare("UPDATE provider_accounts SET status = 'deleted', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  const db = getDb();
+  const accountId = String(req.params.id);
+  const existing = db.prepare('SELECT id FROM provider_accounts WHERE id = ?').get(accountId) as { id: string } | undefined;
+  if (!existing) {
+    res.status(404).json({ error: { message: 'Provider account not found' } });
+    return;
+  }
+  syncLinkedApiKey(accountId, '', '', '', '', '', 'deleted', null);
+  const result = db.prepare("UPDATE provider_accounts SET linked_api_key_id = NULL, status = 'deleted', updated_at = datetime('now') WHERE id = ?").run(accountId);
   if (result.changes === 0) {
     res.status(404).json({ error: { message: 'Provider account not found' } });
     return;
   }
+  scheduleHydrateSecretsToRemote(db);
   res.json({ success: true });
 });
 
