@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { initDb } from '../../db/index.js';
+import { ensurePersistenceSchema } from '../../db/persistence-schema.js';
 
 /**
  * All migrations must be idempotent: running initDb twice on the same
@@ -18,6 +19,7 @@ describe('Migration idempotency', () => {
       fallback: (db1.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
       enabledModels: (db1.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 1').get() as { c: number }).c,
       disabledModels: (db1.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 0').get() as { c: number }).c,
+      clientProfiles: (db1.prepare('SELECT COUNT(*) AS c FROM client_profiles').get() as { c: number }).c,
       orphanFallbacks: (db1.prepare(`
         SELECT COUNT(*) AS c FROM fallback_config f
         LEFT JOIN models m ON f.model_db_id = m.id
@@ -33,6 +35,7 @@ describe('Migration idempotency', () => {
       fallback: (db2.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
       enabledModels: (db2.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 1').get() as { c: number }).c,
       disabledModels: (db2.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 0').get() as { c: number }).c,
+      clientProfiles: (db2.prepare('SELECT COUNT(*) AS c FROM client_profiles').get() as { c: number }).c,
       orphanFallbacks: (db2.prepare(`
         SELECT COUNT(*) AS c FROM fallback_config f
         LEFT JOIN models m ON f.model_db_id = m.id
@@ -43,6 +46,85 @@ describe('Migration idempotency', () => {
 
     expect(after).toEqual(before);
     expect(after.orphanFallbacks).toBe(0);
+    expect(after.clientProfiles).toBeGreaterThanOrEqual(4);
+  });
+
+  it('bootstraps the broker persistence tables used by discovery and workload routing', () => {
+    process.env.ENCRYPTION_KEY = '0'.repeat(64);
+    const db = initDb(':memory:');
+
+    const tableNames = [
+      'provider_catalog_models',
+      'provider_model_limits',
+      'model_change_events',
+      'model_probe_results',
+      'client_profiles',
+      'request_sessions',
+      'model_workload_scores',
+      'route_decisions',
+      'model_aliases',
+    ];
+
+    const missing = tableNames.filter(table => {
+      const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+      return !row;
+    });
+    expect(missing).toEqual([]);
+
+    const providerCatalogColumns = (db.prepare('PRAGMA table_info(provider_catalog_models)').all() as { name: string }[])
+      .map(row => row.name);
+    expect(providerCatalogColumns).toContain('last_seen_at');
+    expect(providerCatalogColumns).toContain('last_probe_at');
+
+    const profiles = db.prepare(`
+      SELECT client_key, default_workload FROM client_profiles
+      ORDER BY client_key
+    `).all() as { client_key: string; default_workload: string }[];
+    expect(profiles).toEqual([
+      { client_key: 'claude-code', default_workload: 'tool_agent' },
+      { client_key: 'generic', default_workload: 'chat' },
+      { client_key: 'lisa', default_workload: 'assistant' },
+      { client_key: 'opencode', default_workload: 'code_agent' },
+    ]);
+  });
+
+  it('upgrades older provider catalog tables with last seen/probe columns', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE provider_accounts (
+        id TEXT PRIMARY KEY,
+        provider_slug TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        encrypted_api_key TEXT NOT NULL,
+        key_iv TEXT NOT NULL,
+        key_auth_tag TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active'
+      );
+      CREATE TABLE provider_catalog_models (
+        id TEXT PRIMARY KEY,
+        provider_slug TEXT NOT NULL,
+        provider_model_id TEXT NOT NULL,
+        display_name TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(provider_slug, provider_model_id)
+      );
+      INSERT INTO provider_catalog_models (id, provider_slug, provider_model_id, display_name)
+      VALUES ('m1', 'test', 'test-model', 'Test Model');
+    `);
+
+    ensurePersistenceSchema(db);
+
+    const columns = (db.prepare('PRAGMA table_info(provider_catalog_models)').all() as { name: string }[])
+      .map(row => row.name);
+    expect(columns).toContain('last_seen_at');
+    expect(columns).toContain('last_probe_at');
+
+    const row = db.prepare('SELECT last_seen_at, last_probe_at FROM provider_catalog_models WHERE id = ?')
+      .get('m1') as { last_seen_at: string | null; last_probe_at: string | null };
+    expect(row.last_seen_at).toBeTruthy();
+    expect(row.last_probe_at).toBeNull();
   });
 
   it('every catalog row has exactly one fallback_config entry', () => {

@@ -130,6 +130,7 @@
         min-height: 100%;
         overflow-x: hidden;
         overflow-y: auto;
+        scroll-behavior: smooth;
         font-feature-settings: 'ss01', 'cv11';
         text-rendering: optimizeLegibility;
         -webkit-font-smoothing: antialiased;
@@ -141,7 +142,7 @@
         min-width: 320px;
         min-height: 100dvh;
         overflow-x: hidden;
-        overscroll-behavior-y: none;
+        overscroll-behavior-y: auto;
         overflow-y: auto;
         font-feature-settings: 'ss01', 'cv11', 'tnum';
     }
@@ -149,9 +150,14 @@
         min-height: 100dvh;
         isolation: isolate;
         overflow-x: clip;
+        overflow-y: visible;
     }
     a, button, [role='button'], input, textarea, select {
         touch-action: manipulation;
+    }
+    main {
+        min-height: calc(100dvh - 4rem);
+        padding-bottom: max(2rem, env(safe-area-inset-bottom));
     }
     main, section, article {
         min-width: 0;

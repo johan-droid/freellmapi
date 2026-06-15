@@ -11,6 +11,14 @@ import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString, messageHasImage, normalizeOutboundContent } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
+import {
+  applyBrokerHeaders,
+  buildBrokerContext,
+  getStickyModelFromSession,
+  logRouteDecision,
+  markModelUnavailableFromError,
+  rememberSessionRoute,
+} from '../services/broker.js';
 
 export const proxyRouter = Router();
 
@@ -417,7 +425,20 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // loop sees nothing, which is strictly worse than an error. Same up-front
   // gate pattern as vision above.
   const wantsTools = (tools?.length ?? 0) > 0;
+  const brokerContext = buildBrokerContext(req, {
+    endpoint: 'chat',
+    token,
+    messages,
+    tools,
+    requestedModel,
+    stream,
+    maxTokens: max_tokens ?? null,
+    hasJsonSignal: false,
+  });
+  const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? requestedModel;
+
   if (wantsTools && !hasEnabledToolsModel()) {
+    applyBrokerHeaders(res, brokerContext);
     res.status(422).json({
       error: {
         message: 'This request includes tools, but no tool-capable model is enabled. Enable a tool-calling model (e.g. GPT-OSS 120B, Gemini 3.5 Flash, GLM-4.7) in the Fallback Chain.',
@@ -433,17 +454,26 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // different model would be surprising to OpenAI-compatible clients.
   // Sticky-session is the fallback when no `model` field was sent at all.
   let preferredModel: number | undefined;
-  if (isAutoModel(requestedModel)) {
+  if (isAutoModel(effectiveRequestedModel)) {
     // Explicit "auto" → behave exactly like an omitted model field.
-    preferredModel = getStickyModel(messages);
-  } else if (requestedModel) {
+    preferredModel = getStickyModelFromSession(brokerContext, hasImage, wantsTools) ?? getStickyModel(messages);
+  } else if (effectiveRequestedModel) {
     const db = getDb();
-    const enabled = db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel) as { id: number } | undefined;
+    const enabled = brokerContext.aliasTarget?.providerSlug
+      ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? AND enabled = 1')
+        .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+      : db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1')
+        .get(effectiveRequestedModel) as { id: number } | undefined;
     if (enabled) {
       preferredModel = enabled.id;
     } else {
-      const disabled = db.prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel) as { id: number } | undefined;
+      const disabled = brokerContext.aliasTarget?.providerSlug
+        ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?')
+          .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+        : db.prepare('SELECT id FROM models WHERE model_id = ?')
+          .get(effectiveRequestedModel) as { id: number } | undefined;
       const reason = disabled ? 'is disabled' : 'is not in the catalog';
+      applyBrokerHeaders(res, brokerContext);
       res.status(400).json({
         error: {
           message: `Model '${requestedModel}' ${reason}. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
@@ -454,7 +484,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       return;
     }
   } else {
-    preferredModel = getStickyModel(messages);
+    preferredModel = getStickyModelFromSession(brokerContext, hasImage, wantsTools) ?? getStickyModel(messages);
   }
 
   // Retry loop: on 429/rate limit, skip that model+key and try the next one
@@ -466,6 +496,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     try {
       route = routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, hasImage, wantsTools);
     } catch (err: any) {
+      applyBrokerHeaders(res, brokerContext);
+      logRouteDecision(brokerContext, null, {
+        status: 'error',
+        fallbackAttempts: attempt,
+        reason: lastError ? sanitizeProviderErrorMessage(lastError.message) : sanitizeProviderErrorMessage(err.message),
+      });
       // No more models available
       if (lastError) {
         const safeLastError = sanitizeProviderErrorMessage(lastError.message);
@@ -507,8 +543,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
               res.setHeader('Content-Type', 'text/event-stream');
               res.setHeader('Cache-Control', 'no-cache');
               res.setHeader('Connection', 'keep-alive');
-              res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-              if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+              applyBrokerHeaders(res, brokerContext, route, attempt);
               streamStarted = true;
             }
             // Coerce array-shaped delta.content to a string before forwarding,
@@ -538,6 +573,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
           recordSuccess(route.modelDbId);
           setStickyModel(messages, route.modelDbId);
+          rememberSessionRoute(brokerContext, route);
+          logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'stream_completed' });
           logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null, ttfbMs);
           return;
         } catch (streamErr: any) {
@@ -550,6 +587,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             const payload = { error: { message: `Provider error (${route.displayName}): stream interrupted`, type: 'stream_error' } };
             try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch { /* socket gone */ }
             try { res.write('data: [DONE]\n\n'); res.end(); } catch { /* socket gone */ }
+            markModelUnavailableFromError(route.platform, route.modelId, streamErr);
+            logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: sanitizeProviderErrorMessage(streamErr.message) });
             logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, sanitizeProviderErrorMessage(streamErr.message));
             return;
           }
@@ -580,9 +619,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         recordTokens(route.platform, route.modelId, route.keyId, totalTokens);
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId);
+        rememberSessionRoute(brokerContext, route);
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyBrokerHeaders(res, brokerContext, route, attempt);
         // Repair double-encoded tool arguments against the request's tool
         // schemas (e.g. GLM emitting an array parameter as a JSON string),
         // so strict clients don't reject the call. Schema-gated — a true
@@ -597,6 +636,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         }
         // Normalize array-shaped message.content to a string on the way out (#166).
         res.json(normalizeOutboundContent(result));
+        logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'completion_completed' });
 
         logRequest(
           route.platform, route.modelId, route.keyId, 'success',
@@ -609,6 +649,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     } catch (err: any) {
       const latency = Date.now() - start;
       const safeError = sanitizeProviderErrorMessage(err.message);
+      markModelUnavailableFromError(route.platform, route.modelId, err);
       logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, latency, safeError);
 
       if (isRetryableError(err)) {
@@ -633,6 +674,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       }
 
       // Non-retryable error (auth, 4xx, etc.): don't retry
+      applyBrokerHeaders(res, brokerContext, route, attempt);
+      logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: safeError });
       res.status(502).json({
         error: {
           message: `Provider error (${route.displayName}): ${safeError}`,
@@ -644,6 +687,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   }
 
   // Exhausted all retries
+  applyBrokerHeaders(res, brokerContext);
+  logRouteDecision(brokerContext, null, {
+    status: 'error',
+    fallbackAttempts: MAX_RETRIES,
+    reason: `exhausted: ${sanitizeProviderErrorMessage(lastError?.message)}`,
+  });
   res.status(429).json({
     error: {
       message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,

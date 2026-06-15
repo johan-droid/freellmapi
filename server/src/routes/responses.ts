@@ -10,9 +10,17 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { routeRequest, recordRateLimitHit, recordSuccess, hasEnabledToolsModel, type RouteResult } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS } from '../services/ratelimit.js';
-import { getUnifiedApiKey } from '../db/index.js';
+import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
+import {
+  applyBrokerHeaders,
+  buildBrokerContext,
+  getStickyModelFromSession,
+  logRouteDecision,
+  markModelUnavailableFromError,
+  rememberSessionRoute,
+} from '../services/broker.js';
 import {
   isRetryableError,
   isPaymentRequiredError,
@@ -316,7 +324,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
     0,
   );
   const estimatedTotal = estimatedInputTokens + (reqData.max_output_tokens ?? 1000);
-  const preferredModel = getStickyModel(messages);
+  const brokerContext = buildBrokerContext(req, {
+    endpoint: 'responses',
+    token,
+    messages,
+    tools,
+    requestedModel: reqData.model,
+    stream,
+    maxTokens: reqData.max_output_tokens ?? null,
+    hasJsonSignal: false,
+  });
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
   // endpoint) must stay on models that emit structured tool_calls — a model
@@ -324,6 +341,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // "successful" run it can't act on. Mirrors the /chat/completions gate.
   const wantsTools = (tools?.length ?? 0) > 0;
   if (wantsTools && !hasEnabledToolsModel()) {
+    applyBrokerHeaders(res, brokerContext);
     res.status(422).json({
       error: {
         message: 'This request includes tools, but no tool-capable model is enabled. Enable a tool-calling model (e.g. GPT-OSS 120B, Gemini 3.5 Flash, GLM-4.7) in the Fallback Chain.',
@@ -332,6 +350,38 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
       },
     });
     return;
+  }
+
+  const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? reqData.model;
+  let preferredModel: number | undefined;
+  if (!effectiveRequestedModel || effectiveRequestedModel === 'auto') {
+    preferredModel = getStickyModelFromSession(brokerContext, false, wantsTools) ?? getStickyModel(messages);
+  } else {
+    const db = getDb();
+    const enabled = brokerContext.aliasTarget?.providerSlug
+      ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? AND enabled = 1')
+        .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+      : db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1')
+        .get(effectiveRequestedModel) as { id: number } | undefined;
+    if (enabled) {
+      preferredModel = enabled.id;
+    } else {
+      const disabled = brokerContext.aliasTarget?.providerSlug
+        ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?')
+          .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+        : db.prepare('SELECT id FROM models WHERE model_id = ?')
+          .get(effectiveRequestedModel) as { id: number } | undefined;
+      const reason = disabled ? 'is disabled' : 'is not in the catalog';
+      applyBrokerHeaders(res, brokerContext);
+      res.status(400).json({
+        error: {
+          message: `Model '${reqData.model}' ${reason}. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
+          type: 'invalid_request_error',
+          code: 'model_not_found',
+        },
+      });
+      return;
+    }
   }
 
   const responseId = newId('resp');
@@ -356,10 +406,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         ? `All models rate-limited. Last error: ${lastError.message}`
         : err.message;
       const type = lastError ? 'rate_limit_error' : 'routing_error';
+      logRouteDecision(brokerContext, null, {
+        status: 'error',
+        fallbackAttempts: attempt,
+        reason: message,
+      });
       if (streamStarted) {
         sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message, type } } });
         res.end();
       } else {
+        applyBrokerHeaders(res, brokerContext);
         res.status(status).json({ error: { message, type } });
       }
       return;
@@ -394,8 +450,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-            if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+            applyBrokerHeaders(res, brokerContext, route, attempt);
             const skeleton = {
               id: responseId, object: 'response', created_at: nowUnix(),
               status: 'in_progress', model: route.modelId, output: [], output_text: '',
@@ -506,6 +561,8 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId);
+        rememberSessionRoute(brokerContext, route);
+        logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'responses_stream_completed' });
         logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null);
         return;
       } else {
@@ -533,13 +590,14 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordTokens(route.platform, route.modelId, route.keyId, result.usage?.total_tokens ?? 0);
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId);
+        rememberSessionRoute(brokerContext, route);
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyBrokerHeaders(res, brokerContext, route, attempt);
         res.json(buildResponseObject({
           id: responseId, model: route.modelId, text, toolCalls,
           promptTokens, completionTokens,
         }));
+        logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'responses_completed' });
 
         logRequest(route.platform, route.modelId, route.keyId, 'success',
           promptTokens, completionTokens, Date.now() - start, null);
@@ -547,12 +605,14 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
       }
     } catch (err: any) {
       const latency = Date.now() - start;
+      markModelUnavailableFromError(route.platform, route.modelId, err);
       logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, latency, err.message);
 
       // Mid-stream failures can't be retried (bytes already sent) — close cleanly.
       if (stream && streamStarted) {
         sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: `Provider error (${route.displayName}): stream interrupted`, type: 'stream_error' } } });
         res.end();
+        logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: `stream interrupted: ${err.message}` });
         return;
       }
 
@@ -566,6 +626,8 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         continue;
       }
 
+      applyBrokerHeaders(res, brokerContext, route, attempt);
+      logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: err.message });
       res.status(502).json({ error: { message: `Provider error (${route.displayName}): ${err.message}`, type: 'provider_error' } });
       return;
     }
@@ -576,11 +638,13 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // streamStarted) — close the SSE stream with a failed event instead of
   // writing JSON onto a committed event-stream response.
   const exhaustedMsg = `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${lastError?.message}`;
+  logRouteDecision(brokerContext, null, { status: 'error', fallbackAttempts: MAX_RETRIES, reason: exhaustedMsg });
   if (streamStarted) {
     sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: exhaustedMsg, type: 'rate_limit_error' } } });
     res.end();
     return;
   }
+  applyBrokerHeaders(res, brokerContext);
   res.status(429).json({
     error: { message: exhaustedMsg, type: 'rate_limit_error' },
   });

@@ -41,8 +41,8 @@ function upsertDiscoveredModel(model: DiscoveredModel): void {
     INSERT INTO provider_catalog_models (
       id, provider_slug, provider_model_id, display_name, status, context_window, max_output_tokens,
       supports_tools, supports_vision, supports_streaming, supports_json, input_modalities,
-      output_modalities, raw_metadata_json, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      output_modalities, raw_metadata_json, discovered_at, last_seen_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
     ON CONFLICT(provider_slug, provider_model_id) DO UPDATE SET
       display_name = excluded.display_name,
       status = 'active',
@@ -55,6 +55,7 @@ function upsertDiscoveredModel(model: DiscoveredModel): void {
       input_modalities = excluded.input_modalities,
       output_modalities = excluded.output_modalities,
       raw_metadata_json = excluded.raw_metadata_json,
+      last_seen_at = datetime('now'),
       removed_at = NULL,
       updated_at = datetime('now')
   `).run(

@@ -6,6 +6,7 @@ import { resolveDefaultDbPath } from '../env.js';
 import { initEncryptionKey } from '../lib/crypto.js';
 import { hasRemoteSecretsStore, hydrateSecretsFromRemote, hydrateSecretsToRemote, remoteSecretCounts } from '../services/remote-secrets.js';
 import { applyModelPricing } from './model-pricing.js';
+import { ensurePersistenceSchema } from './persistence-schema.js';
 
 const DB_PATH = resolveDefaultDbPath();
 
@@ -34,6 +35,7 @@ export function initDb(dbPath?: string): Database.Database {
   db.pragma('foreign_keys = ON');
 
   createTables(db);
+  ensurePersistenceSchema(db);
   if (hasRemoteSecretsStore()) {
     const counts = remoteSecretCounts();
     if (counts && (counts.settings > 0 || counts.apiKeys > 0)) {

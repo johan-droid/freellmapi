@@ -72,7 +72,7 @@ export function createApp() {
     },
     credentials: false,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-FreeLLMAPI-Client', 'X-Client-Name'],
     maxAge: 600,
   }));
 
