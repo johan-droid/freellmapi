@@ -5,6 +5,8 @@ import type {
   Platform,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
+import { recordQuotaObservationsFromResponse } from '../services/provider-quota.js';
+import type { QuotaObservationContext } from '../services/provider-quota.js';
 
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
@@ -68,6 +70,7 @@ export class OpenAICompatProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
     const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -88,6 +91,14 @@ export class OpenAICompatProvider extends BaseProvider {
       }),
     }, this.timeoutMs);
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       throw await this.providerError(res);
     }
@@ -115,6 +126,7 @@ export class OpenAICompatProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
     const res = await this.fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -136,6 +148,14 @@ export class OpenAICompatProvider extends BaseProvider {
       }),
     }, this.timeoutMs);
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       throw await this.providerError(res);
     }
@@ -168,7 +188,7 @@ export class OpenAICompatProvider extends BaseProvider {
     }
   }
 
-  async validateKey(apiKey: string): Promise<boolean> {
+  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
     // Note: transport errors (DNS / timeout / TLS) propagate to the caller.
     // health.ts catches them and marks status='error' WITHOUT incrementing
     // the consecutive-failure counter — only confirmed 401/403 disables a key.
@@ -185,6 +205,13 @@ export class OpenAICompatProvider extends BaseProvider {
         ...this.extraHeaders,
       },
     }, 30000);
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'models',
+    });
     return res.status !== 401 && res.status !== 403;
   }
 }

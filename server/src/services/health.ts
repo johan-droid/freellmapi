@@ -3,6 +3,7 @@ import { resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { scheduleHydrateSecretsToRemote } from './remote-secrets.js';
 import type { Platform, KeyStatus } from '@freellmapi/shared/types.js';
+import { inferQuotaPoolKey } from './provider-quota.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const CONSECUTIVE_FAILURES_TO_DISABLE = 3;
@@ -28,7 +29,13 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
       db.prepare("UPDATE api_keys SET status = ?, last_checked_at = datetime('now') WHERE id = ?").run('unreadable', keyId);
       return 'invalid' as KeyStatus; // Use a known status to avoid deleting, UI will handle 'unreadable' if needed.
     }
-    const isValid = await provider.validateKey(apiKey);
+    const isValid = await provider.validateKey(apiKey, {
+      platform: row.platform as Platform,
+      keyId,
+      quotaPoolKey: inferQuotaPoolKey(row.platform as Platform),
+      origin: 'health',
+      endpoint: 'models',
+    });
 
 
     const status: KeyStatus = isValid ? 'healthy' : 'invalid';

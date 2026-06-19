@@ -9,6 +9,8 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 import { contentToString } from '../lib/content.js';
+import { recordQuotaObservationsFromResponse } from '../services/provider-quota.js';
+import type { QuotaObservationContext } from '../services/provider-quota.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -326,6 +328,7 @@ export class GoogleProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
     const { contents, systemInstruction } = await toGeminiContents(messages);
 
@@ -348,6 +351,14 @@ export class GoogleProvider extends BaseProvider {
       body: JSON.stringify(body),
     });
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
@@ -389,6 +400,7 @@ export class GoogleProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
     const { contents, systemInstruction } = await toGeminiContents(messages);
 
@@ -411,6 +423,14 @@ export class GoogleProvider extends BaseProvider {
       body: JSON.stringify(body),
     });
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`Google API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`);
@@ -528,7 +548,7 @@ export class GoogleProvider extends BaseProvider {
     }
   }
 
-  async validateKey(apiKey: string): Promise<boolean> {
+  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
     // Transport errors propagate — health.ts marks status='error' without
     // counting toward auto-disable. Only confirmed 401/403 disables a key.
     const res = await this.fetchWithTimeout(
@@ -536,6 +556,13 @@ export class GoogleProvider extends BaseProvider {
       { method: 'GET' },
       10000,
     );
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'models',
+    });
     return res.status !== 401 && res.status !== 403;
   }
 }

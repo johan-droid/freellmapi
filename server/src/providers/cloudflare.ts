@@ -5,6 +5,8 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 import { contentToString } from '../lib/content.js';
+import { recordQuotaObservationsFromResponse } from '../services/provider-quota.js';
+import type { QuotaObservationContext } from '../services/provider-quota.js';
 
 /**
  * Cloudflare Workers AI provider.
@@ -34,6 +36,7 @@ export class CloudflareProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
     const { accountId, token } = this.parseKey(apiKey);
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
@@ -56,6 +59,14 @@ export class CloudflareProvider extends BaseProvider {
       }),
     });
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`);
@@ -71,6 +82,7 @@ export class CloudflareProvider extends BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
     const { accountId, token } = this.parseKey(apiKey);
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
@@ -94,6 +106,14 @@ export class CloudflareProvider extends BaseProvider {
       }),
     });
 
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      modelId,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'chat/completions',
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`);
@@ -127,7 +147,7 @@ export class CloudflareProvider extends BaseProvider {
     }
   }
 
-  async validateKey(apiKey: string): Promise<boolean> {
+  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
     // Transport errors propagate — health.ts marks status='error' without
     // counting toward auto-disable. Only confirmed bad/inactive tokens disable.
     const { token } = this.parseKey(apiKey);
@@ -136,6 +156,13 @@ export class CloudflareProvider extends BaseProvider {
       { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } },
       10000,
     );
+    recordQuotaObservationsFromResponse(res, {
+      platform: this.platform,
+      keyId: quotaContext?.keyId,
+      providerAccountId: quotaContext?.providerAccountId,
+      quotaPoolKey: quotaContext?.quotaPoolKey,
+      endpoint: 'tokens/verify',
+    });
     if (res.status === 401 || res.status === 403) return false;
     if (!res.ok) return true; // unexpected non-2xx that isn't auth — don't disable
     const data = await res.json() as any;

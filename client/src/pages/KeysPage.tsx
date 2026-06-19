@@ -81,6 +81,35 @@ interface HealthPlatform {
 interface HealthData {
   platforms: HealthPlatform[]
   keys: { id: number; platform: string; status: string; lastCheckedAt: string | null }[]
+  quotaStates?: {
+    platform: string
+    keyId: number
+    quotaPoolKey: string
+    metric: string
+    limit: number | null
+    remaining: number | null
+    resetAt: string | null
+    resetStrategy: string
+    source: string
+    confidence: number
+    notes: string | null
+    observedAt: string
+    updatedAt: string
+    providerAccountId: string | null
+    modelId: string | null
+    endpoint: string | null
+    statusCode: number | null
+    retryAfterMs: number | null
+    rawJson: string | null
+    createdAt: string
+  }[]
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString()
 }
 
 function UnifiedKeySection() {
@@ -381,6 +410,13 @@ export default function KeysPage() {
 
   const healthKeyMap = new Map<number, { status: string; lastCheckedAt: string | null }>()
   for (const k of healthData?.keys ?? []) healthKeyMap.set(k.id, k)
+  const quotaStates = (healthData?.quotaStates ?? [])
+    .slice()
+    .sort((a, b) => a.platform.localeCompare(b.platform) || a.keyId - b.keyId || a.metric.localeCompare(b.metric))
+  const quotaSignalsByKey = new Map<number, number>()
+  for (const state of quotaStates) {
+    quotaSignalsByKey.set(state.keyId, (quotaSignalsByKey.get(state.keyId) ?? 0) + 1)
+  }
 
   const grouped = [...PLATFORMS, CUSTOM_GROUP]
     .map(p => ({ ...p, keys: keys.filter(k => k.platform === p.value) }))
@@ -525,6 +561,72 @@ export default function KeysPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-medium">Quota signals</h2>
+            <span className="text-xs text-muted-foreground">Live headers when available, otherwise the last known reset hint</span>
+          </div>
+
+          {quotaStates.length === 0 ? (
+            <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+              No quota observations yet. Ping a key, then check back after the next health pass.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border bg-card">
+              <div className="divide-y">
+                {quotaStates.map(state => {
+                  const key = keys.find(k => k.id === state.keyId)
+                  const metricLabel = state.metric === 'tokens'
+                    ? 'Tokens'
+                    : state.metric === 'credits'
+                      ? 'Credits'
+                      : state.metric === 'neurons'
+                        ? 'Neurons'
+                        : 'Requests'
+                  const confidenceLabel = state.confidence >= 0.9 ? 'live' : state.confidence >= 0.5 ? 'estimated' : 'unknown'
+                  const confidenceClass = state.confidence >= 0.9
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                    : state.confidence >= 0.5
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      : 'bg-muted text-muted-foreground'
+                  const signalCount = quotaSignalsByKey.get(state.keyId) ?? 0
+                  return (
+                    <div key={`${state.keyId}:${state.quotaPoolKey}:${state.metric}`} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] sm:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{key?.label ?? state.platform}</span>
+                          <span className="text-xs text-muted-foreground">{state.platform}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${confidenceClass}`}>{confidenceLabel}</span>
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground uppercase tracking-wide">{state.source}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {state.quotaPoolKey} · {metricLabel}
+                          {state.notes ? ` · ${state.notes}` : ''}
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        <div className="tabular-nums">
+                          {state.remaining !== null ? `${state.remaining} remaining` : 'Remaining unknown'}
+                          {state.limit !== null ? ` / ${state.limit}` : ''}
+                        </div>
+                        <div className="mt-1 tabular-nums">
+                          Reset {state.resetAt ? formatDateTime(state.resetAt) : 'unknown'}
+                          {state.retryAfterMs !== null ? ` · retry in ${Math.max(0, Math.round(state.retryAfterMs / 1000))}s` : ''}
+                        </div>
+                      </div>
+                      <div className="text-right text-[11px] text-muted-foreground tabular-nums">
+                        <div>Updated {formatDateTime(state.updatedAt)}</div>
+                        <div>{signalCount} signal{signalCount === 1 ? '' : 's'}</div>
+                        {state.endpoint && <div className="truncate">{state.endpoint}</div>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
         </section>

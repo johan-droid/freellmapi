@@ -4,6 +4,7 @@ import { getDb } from '../db/index.js';
 import { checkKeyHealth, checkAllKeys } from '../services/health.js';
 import { hasProvider } from '../providers/index.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import { getQuotaStateForKeys } from '../services/provider-quota.js';
 
 export const healthRouter = Router();
 
@@ -30,6 +31,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     FROM api_keys
     ORDER BY platform, created_at DESC
   `).all() as any[];
+  const quotaStates = getQuotaStateForKeys();
 
   res.json({
     platforms: platforms.map(p => ({
@@ -51,6 +53,28 @@ healthRouter.get('/', (_req: Request, res: Response) => {
       enabled: k.enabled === 1,
       createdAt: k.created_at,
       lastCheckedAt: k.last_checked_at,
+    })),
+    quotaStates: quotaStates.map(q => ({
+      platform: q.platform,
+      keyId: q.keyId,
+      quotaPoolKey: q.quotaPoolKey,
+      metric: q.metric,
+      limit: q.limit,
+      remaining: q.remaining,
+      resetAt: q.resetAt,
+      resetStrategy: q.resetStrategy,
+      source: q.source,
+      confidence: q.confidence,
+      notes: q.notes,
+      observedAt: q.observedAt,
+      updatedAt: q.updatedAt,
+      providerAccountId: q.providerAccountId,
+      modelId: q.modelId,
+      endpoint: q.endpoint,
+      statusCode: q.statusCode,
+      retryAfterMs: q.retryAfterMs,
+      rawJson: q.rawJson,
+      createdAt: q.createdAt,
     })),
   });
 });

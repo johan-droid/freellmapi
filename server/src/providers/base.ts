@@ -6,6 +6,7 @@ import type {
   ChatToolChoice,
   Platform,
 } from '@freellmapi/shared/types.js';
+import type { QuotaObservationContext } from '../services/provider-quota.js';
 
 export interface CompletionOptions {
   model?: string;
@@ -31,6 +32,7 @@ export abstract class BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse>;
 
   abstract streamChatCompletion(
@@ -38,9 +40,10 @@ export abstract class BaseProvider {
     messages: ChatMessage[],
     modelId: string,
     options?: CompletionOptions,
+    quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk>;
 
-  abstract validateKey(apiKey: string): Promise<boolean>;
+  abstract validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean>;
 
   protected async fetchWithTimeout(
     url: string,

@@ -7,10 +7,12 @@ import type {
   ChatToolCall,
   ChatToolDefinition,
   ChatToolChoice,
+  Platform,
 } from '@freellmapi/shared/types.js';
 import { routeRequest, recordRateLimitHit, recordSuccess, hasEnabledToolsModel, type RouteResult } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS } from '../services/ratelimit.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { inferQuotaPoolKey } from '../services/provider-quota.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import {
@@ -567,7 +569,20 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null);
         return;
       } else {
-        const result = await route.provider.chatCompletion(route.apiKey, messages, route.modelId, completionOpts);
+        const result = await route.provider.chatCompletion(
+          route.apiKey,
+          messages,
+          route.modelId,
+          completionOpts,
+          {
+            platform: route.platform as Platform,
+            keyId: route.keyId,
+            modelId: route.modelId,
+            quotaPoolKey: inferQuotaPoolKey(route.platform as Platform, route.modelId),
+            origin: 'responses',
+            endpoint: 'chat/completions',
+          },
+        );
 
         const msg = result.choices[0]?.message;
         const text = contentToString(msg?.content ?? '');
