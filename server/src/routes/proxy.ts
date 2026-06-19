@@ -15,6 +15,8 @@ import { getContextHandoffMode, recordIncomingMessages, maybeInjectContextHandof
 import { isFusionModel, runFusion, fusionConfigSchema, FusionError, FUSION_MODEL_ID } from '../services/fusion.js';
 import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError } from '../lib/error-classify.js';
 import { logRequest } from '../lib/request-log.js';
+import type { Platform } from '@freellmapi/shared/types.js';
+import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 
 export const proxyRouter = Router();
 
@@ -58,6 +60,17 @@ export function extractApiToken(req: Request): string | undefined {
   const xApiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
   const trimmed = xApiKey?.trim();
   return trimmed || undefined;
+}
+
+function quotaContextForRoute(route: RouteResult, endpoint: string): QuotaObservationContext {
+  return {
+    platform: route.platform as Platform,
+    keyId: route.keyId,
+    modelId: route.modelId,
+    quotaPoolKey: inferQuotaPoolKey(route.platform as Platform, route.modelId),
+    endpoint,
+    origin: 'proxy',
+  };
 }
 
 // Sticky sessions: track which model served each "session"
@@ -850,6 +863,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           const gen = route.provider.streamChatCompletion(
             route.apiKey, outboundMessages, route.modelId,
             { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
+            quotaContextForRoute(route, 'chat/completions'),
           );
 
           for await (const chunk of gen) {
@@ -1018,6 +1032,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         const result = await route.provider.chatCompletion(
           route.apiKey, outboundMessages, route.modelId,
           { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
+          quotaContextForRoute(route, 'chat/completions'),
         );
 
         // Empty completion (no text, no tool calls) → fail over rather than
