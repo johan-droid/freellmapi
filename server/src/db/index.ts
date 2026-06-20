@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { migrateDbSchema } from './migrations.js';
+import { ensurePersistenceSchema } from './persistence-schema.js';
 import { resolveDefaultDbPath } from '../env.js';
 import { hasRemoteSecretsStore, scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 
@@ -34,6 +35,7 @@ export function initDb(dbPath?: string): Database.Database {
   db.pragma('foreign_keys = ON');
 
   migrateDbSchema(db);
+  ensurePersistenceSchema(db);
 
   if (hasRemoteSecretsStore()) {
     scheduleHydrateSecretsToRemote(db);

@@ -104,6 +104,10 @@ export function createApp() {
   app.use('/api/health', requireAuth, healthRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
   app.use('/api/premium', requireAuth, premiumRouter);
+  app.use('/api/providers', requireAuth, providersRouter);
+  app.use('/api/provider-accounts', requireAuth, providerAccountsRouter);
+  app.use('/api/model-discovery', requireAuth, modelDiscoveryRouter);
+  app.use('/api/storage', requireAuth, storageRouter);
 
   app.use('/v1', createProxyRateLimiter());
   app.use('/v1', proxyRouter);

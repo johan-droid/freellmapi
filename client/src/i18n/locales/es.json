@@ -90,7 +90,16 @@
     "noModelsBefore": "No hay modelos disponibles. Añade claves API en la ",
     "keysPageLink": "página Claves",
     "noModelsAfter": " primero.",
-    "hiddenNoKeys": "Ocultos (sin clave): {platforms}"
+    "hiddenNoKeys": "Ocultos (sin clave): {platforms}",
+    "searchPlaceholder": "Buscar modelos o proveedores…",
+    "clearSearch": "Borrar búsqueda",
+    "ctxAny": "Cualquier contexto",
+    "ctxBadge": "{size} ctx",
+    "ctxTitle": "Ventana de contexto",
+    "copyModelId": "Copiar id del modelo",
+    "showingCount": "{shown} de {total} modelos",
+    "clearFilters": "Borrar filtros",
+    "noMatches": "Ningún modelo coincide con tus filtros."
   },
   "strategies": {
     "title": "Estrategia de enrutamiento",
@@ -242,6 +251,9 @@
     "title": "Entorno de pruebas",
     "description": "Envía una finalización de chat a través del enrutador y observa qué proveedor la atiende.",
     "autoModel": "Auto (cadena de reserva)",
+    "autoModelCoding": "Auto: Programación (desarrollo y agentes)",
+    "autoModelThinking": "Auto: Pensamiento (razonamiento y búsqueda)",
+    "autoModelAgentic": "Auto: Agente (herramientas y flujos)",
     "fusionModel": "Fusión (síntesis multimodelo)",
     "send": "Enviar",
     "sending": "Enviando…",

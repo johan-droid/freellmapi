@@ -17,9 +17,26 @@ type SecretKey = {
   base_url: string | null;
 };
 
+type ProviderAccount = {
+  id: string;
+  provider_slug: string;
+  display_name: string;
+  account_email: string | null;
+  encrypted_api_key: string;
+  key_iv: string;
+  key_auth_tag: string;
+  key_hint: string | null;
+  linked_api_key_id: number | null;
+  status: string;
+  base_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type SecretSnapshot = {
   settings: SecretSetting[];
   apiKeys: SecretKey[];
+  providerAccounts: ProviderAccount[];
 };
 
 let pendingPushSnapshot: SecretSnapshot | null = null;
@@ -74,15 +91,55 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
           base_url TEXT
         )
       \`);
+      await pool.query(\`
+        CREATE TABLE IF NOT EXISTS provider_accounts (
+          id TEXT PRIMARY KEY,
+          provider_slug TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          account_email TEXT,
+          encrypted_api_key TEXT NOT NULL,
+          key_iv TEXT NOT NULL,
+          key_auth_tag TEXT NOT NULL,
+          key_hint TEXT,
+          linked_api_key_id INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          base_url TEXT,
+          created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+          updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )
+      \`);
+
+      try {
+        const checkConstraints = await pool.query(
+          "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'api_keys' AND con.contype = 'c'"
+        );
+        for (const row of checkConstraints.rows) {
+          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + row.conname);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      try {
+        const checkConstraintsPA = await pool.query(
+          "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'provider_accounts' AND con.contype = 'c'"
+        );
+        for (const row of checkConstraintsPA.rows) {
+          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + row.conname);
+        }
+      } catch (e) {
+        // ignore
+      }
     }
 
     async function pull() {
       await ensureSchema();
-      const [settings, apiKeys] = await Promise.all([
+      const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT key, value FROM settings ORDER BY key'),
         pool.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url FROM api_keys ORDER BY id'),
+        pool.query('SELECT id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at FROM provider_accounts ORDER BY id'),
       ]);
-      console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows }));
+      console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows, providerAccounts: providerAccounts.rows }));
     }
 
     async function push() {
@@ -117,6 +174,31 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
             row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url,
           ]);
         }
+        for (const row of input.providerAccounts ?? []) {
+          await pool.query(\`
+            INSERT INTO provider_accounts
+              (id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at)
+            VALUES
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (id) DO UPDATE SET
+              provider_slug = EXCLUDED.provider_slug,
+              display_name = EXCLUDED.display_name,
+              account_email = EXCLUDED.account_email,
+              encrypted_api_key = EXCLUDED.encrypted_api_key,
+              key_iv = EXCLUDED.key_iv,
+              key_auth_tag = EXCLUDED.key_auth_tag,
+              key_hint = EXCLUDED.key_hint,
+              linked_api_key_id = EXCLUDED.linked_api_key_id,
+              status = EXCLUDED.status,
+              base_url = EXCLUDED.base_url,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at
+          \`, [
+            row.id, row.provider_slug, row.display_name, row.account_email, row.encrypted_api_key,
+            row.key_iv, row.key_auth_tag, row.key_hint, row.linked_api_key_id, row.status,
+            row.base_url, row.created_at, row.updated_at,
+          ]);
+        }
         await pool.query('COMMIT');
         console.log(JSON.stringify({ ok: true }));
       } catch (err) {
@@ -129,11 +211,16 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
 
     async function status() {
       await ensureSchema();
-      const [settings, apiKeys] = await Promise.all([
+      const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT COUNT(*)::int AS count FROM settings'),
         pool.query('SELECT COUNT(*)::int AS count FROM api_keys'),
+        pool.query('SELECT COUNT(*)::int AS count FROM provider_accounts'),
       ]);
-      console.log(JSON.stringify({ settings: settings.rows[0].count, apiKeys: apiKeys.rows[0].count }));
+      console.log(JSON.stringify({
+        settings: settings.rows[0].count,
+        apiKeys: apiKeys.rows[0].count,
+        providerAccounts: providerAccounts.rows[0].count
+      }));
     }
 
     try {
@@ -210,15 +297,55 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
           base_url TEXT
         )
       \`);
+      await pool.query(\`
+        CREATE TABLE IF NOT EXISTS provider_accounts (
+          id TEXT PRIMARY KEY,
+          provider_slug TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          account_email TEXT,
+          encrypted_api_key TEXT NOT NULL,
+          key_iv TEXT NOT NULL,
+          key_auth_tag TEXT NOT NULL,
+          key_hint TEXT,
+          linked_api_key_id INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          base_url TEXT,
+          created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+          updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )
+      \`);
+
+      try {
+        const checkConstraints = await pool.query(
+          "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'api_keys' AND con.contype = 'c'"
+        );
+        for (const row of checkConstraints.rows) {
+          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + row.conname);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      try {
+        const checkConstraintsPA = await pool.query(
+          "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'provider_accounts' AND con.contype = 'c'"
+        );
+        for (const row of checkConstraintsPA.rows) {
+          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + row.conname);
+        }
+      } catch (e) {
+        // ignore
+      }
     }
 
     async function pull() {
       await ensureSchema();
-      const [settings, apiKeys] = await Promise.all([
+      const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT key, value FROM settings ORDER BY key'),
         pool.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url FROM api_keys ORDER BY id'),
+        pool.query('SELECT id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at FROM provider_accounts ORDER BY id'),
       ]);
-      console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows }));
+      console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows, providerAccounts: providerAccounts.rows }));
     }
 
     async function push() {
@@ -253,6 +380,31 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
             row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url,
           ]);
         }
+        for (const row of input.providerAccounts ?? []) {
+          await pool.query(\`
+            INSERT INTO provider_accounts
+              (id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at)
+            VALUES
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (id) DO UPDATE SET
+              provider_slug = EXCLUDED.provider_slug,
+              display_name = EXCLUDED.display_name,
+              account_email = EXCLUDED.account_email,
+              encrypted_api_key = EXCLUDED.encrypted_api_key,
+              key_iv = EXCLUDED.key_iv,
+              key_auth_tag = EXCLUDED.key_auth_tag,
+              key_hint = EXCLUDED.key_hint,
+              linked_api_key_id = EXCLUDED.linked_api_key_id,
+              status = EXCLUDED.status,
+              base_url = EXCLUDED.base_url,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at
+          \`, [
+            row.id, row.provider_slug, row.display_name, row.account_email, row.encrypted_api_key,
+            row.key_iv, row.key_auth_tag, row.key_hint, row.linked_api_key_id, row.status,
+            row.base_url, row.created_at, row.updated_at,
+          ]);
+        }
         await pool.query('COMMIT');
         console.log(JSON.stringify({ ok: true }));
       } catch (err) {
@@ -265,11 +417,16 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
 
     async function status() {
       await ensureSchema();
-      const [settings, apiKeys] = await Promise.all([
+      const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT COUNT(*)::int AS count FROM settings'),
         pool.query('SELECT COUNT(*)::int AS count FROM api_keys'),
+        pool.query('SELECT COUNT(*)::int AS count FROM provider_accounts'),
       ]);
-      console.log(JSON.stringify({ settings: settings.rows[0].count, apiKeys: apiKeys.rows[0].count }));
+      console.log(JSON.stringify({
+        settings: settings.rows[0].count,
+        apiKeys: apiKeys.rows[0].count,
+        providerAccounts: providerAccounts.rows[0].count
+      }));
     }
 
     try {
@@ -323,7 +480,12 @@ function readLocalSecretSnapshot(db: Database.Database): SecretSnapshot {
     FROM api_keys
     ORDER BY id
   `).all() as SecretKey[];
-  return { settings, apiKeys };
+  const providerAccounts = db.prepare(`
+    SELECT id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at
+    FROM provider_accounts
+    ORDER BY id
+  `).all() as ProviderAccount[];
+  return { settings, apiKeys, providerAccounts };
 }
 
 function upsertLocalSecrets(db: Database.Database, snapshot: SecretSnapshot): void {
@@ -347,6 +509,24 @@ function upsertLocalSecrets(db: Database.Database, snapshot: SecretSnapshot): vo
       last_checked_at = excluded.last_checked_at,
       base_url = excluded.base_url
   `);
+  const upsertProviderAccount = db.prepare(`
+    INSERT INTO provider_accounts
+      (id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      provider_slug = excluded.provider_slug,
+      display_name = excluded.display_name,
+      account_email = excluded.account_email,
+      encrypted_api_key = excluded.encrypted_api_key,
+      key_iv = excluded.key_iv,
+      key_auth_tag = excluded.key_auth_tag,
+      key_hint = excluded.key_hint,
+      linked_api_key_id = excluded.linked_api_key_id,
+      status = excluded.status,
+      base_url = excluded.base_url,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
+  `);
 
   const apply = db.transaction(() => {
     for (const row of snapshot.settings) {
@@ -356,6 +536,13 @@ function upsertLocalSecrets(db: Database.Database, snapshot: SecretSnapshot): vo
       upsertKey.run(
         row.id, row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag,
         row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url,
+      );
+    }
+    for (const row of snapshot.providerAccounts ?? []) {
+      upsertProviderAccount.run(
+        row.id, row.provider_slug, row.display_name, row.account_email, row.encrypted_api_key,
+        row.key_iv, row.key_auth_tag, row.key_hint, row.linked_api_key_id, row.status,
+        row.base_url, row.created_at, row.updated_at,
       );
     }
   });
@@ -406,7 +593,7 @@ export function scheduleHydrateSecretsToRemote(db: Database.Database): boolean {
   return true;
 }
 
-export function remoteSecretCounts(): { settings: number; apiKeys: number } | null {
+export function remoteSecretCounts(): { settings: number; apiKeys: number; providerAccounts: number } | null {
   if (!hasRemoteSecretsStore()) return null;
-  return runRemoteCommand('status') as { settings: number; apiKeys: number };
+  return runRemoteCommand('status') as { settings: number; apiKeys: number; providerAccounts: number };
 }

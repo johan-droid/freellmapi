@@ -31,13 +31,15 @@ import {
   isProviderAuthFailoverError,
   timingSafeStringEqual,
   extractApiToken,
+  getRequestGroupId,
   getStickyModel,
   setStickyModel,
+  traceRouteEvent,
   logRequest,
 } from './proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
-import { detectRequestIntent } from '../services/request-intent.js';
+import { detectRequestIntent, isAutoModel, overrideIntentFromModel } from '../services/request-intent.js';
 
 export const responsesRouter = Router();
 
@@ -287,6 +289,8 @@ function quotaContextForRoute(route: RouteResult, endpoint: string): QuotaObserv
 
 responsesRouter.post('/responses', async (req: Request, res: Response) => {
   const start = Date.now();
+  const requestGroupId = getRequestGroupId(req);
+  res.setHeader('X-Request-ID', requestGroupId);
 
   // Same unified-key auth as the proxy (accepts Bearer or x-api-key).
   const token = extractApiToken(req);
@@ -325,7 +329,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   const stream = reqData.stream ?? false;
   const messages = toChatMessages(reqData);
   const tools = toChatTools(reqData.tools);
-  const requestIntent = detectRequestIntent(messages, reqData.tools as any[]);
+  const requestIntent = overrideIntentFromModel(detectRequestIntent(messages, reqData.tools as any[]), reqData.model);
   // name → parameter schema, for repairing double-encoded tool arguments on
   // the way back out (see lib/tool-args.ts).
   const toolSchemas = toolSchemaMap(tools);
@@ -347,7 +351,6 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // Optional client-managed session affinity (mirrors /chat/completions).
   const rawSessionId = req.headers['x-session-id'];
   const sessionIdHeader = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
-
   const brokerContext = buildBrokerContext(req, {
     endpoint: 'responses',
     token,
@@ -357,6 +360,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
     stream,
     maxTokens: reqData.max_output_tokens,
   });
+  const requestedModelLabel = reqData.model ?? 'auto';
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
   // endpoint) must stay on models that emit structured tool_calls — a model
@@ -377,7 +381,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
 
   const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? reqData.model;
   let preferredModel: number | undefined;
-  if (!effectiveRequestedModel || effectiveRequestedModel === 'auto') {
+  if (!effectiveRequestedModel || isAutoModel(effectiveRequestedModel)) {
     preferredModel = getStickyModelFromSession(brokerContext, false, wantsTools) ?? getStickyModel(messages, sessionIdHeader);
   } else {
     const db = getDb();
@@ -455,6 +459,14 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
     }
 
     try {
+      traceRouteEvent('Responses', {
+        event: attempt === 0 ? 'start' : 'next',
+        requestId: requestGroupId,
+        attempt,
+        platform: route.platform,
+        model: route.modelId,
+        requestedModel: attempt === 0 ? requestedModelLabel : undefined,
+      });
       if (stream) {
         let outputIndex = 0;
         let msgItemId: string | null = null;
@@ -596,6 +608,15 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
             ? rescueInlineToolCalls(heldText, new Set((tools ?? []).map(t => t.function.name)))
             : { detected: false as const, calls: null, cleanText: heldText };
           if (rescue.detected && !rescue.calls) {
+            traceRouteEvent('Responses', {
+              event: 'fail',
+              requestId: requestGroupId,
+              attempt,
+              platform: route.platform,
+              model: route.modelId,
+              latencyMs: Date.now() - start,
+              error: 'unparseable inline tool-call dialect',
+            });
             logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, Date.now() - start, `unparseable inline tool-call dialect: ${heldText.slice(0, 120)}`);
             skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
             setCooldown(route.platform, route.modelId, route.keyId, getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
@@ -637,6 +658,15 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         // skeletons are out), so it's safe to fail over to the next model on
         // the same SSE stream.
         if (msgText.length === 0 && toolAcc.size === 0) {
+          traceRouteEvent('Responses', {
+            event: 'fail',
+            requestId: requestGroupId,
+            attempt,
+            platform: route.platform,
+            model: route.modelId,
+            latencyMs: Date.now() - start,
+            error: 'empty completion',
+          });
           logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, Date.now() - start, 'empty completion (no content, no tool_calls)');
           skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
           setCooldown(route.platform, route.modelId, route.keyId, getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
@@ -676,6 +706,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId, sessionIdHeader);
+        traceRouteEvent('Responses', {
+          event: 'ok',
+          requestId: requestGroupId,
+          attempt,
+          platform: route.platform,
+          model: route.modelId,
+          latencyMs: Date.now() - start,
+          inputTokens: estimatedInputTokens,
+          outputTokens: totalOutputTokens,
+        });
         logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null);
         return;
       } else {
@@ -715,7 +755,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
 
         // Empty completion → fail over (see the streaming-path comment above).
         if (!text && toolCalls.length === 0) {
-          logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, Date.now() - start, 'empty completion (no content, no tool_calls)');
+          traceRouteEvent('Responses', {
+            event: 'fail',
+            requestId: requestGroupId,
+            attempt,
+            platform: route.platform,
+            model: route.modelId,
+            latencyMs: Date.now() - start,
+            error: 'empty completion',
+          });
+          logRequest(route.platform, route.modelId, route.keyId, 'error', promptTokens, 0, Date.now() - start, 'empty completion (no content, no tool_calls)');
           skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
           setCooldown(route.platform, route.modelId, route.keyId, getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
           recordRateLimitHit(route.modelDbId);
@@ -735,13 +784,31 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         }));
         logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'responses_completed' });
 
-        logRequest(route.platform, route.modelId, route.keyId, 'success',
-          promptTokens, completionTokens, Date.now() - start, null);
+        traceRouteEvent('Responses', {
+          event: 'ok',
+          requestId: requestGroupId,
+          attempt,
+          platform: route.platform,
+          model: route.modelId,
+          latencyMs: Date.now() - start,
+          inputTokens: promptTokens,
+          outputTokens: completionTokens,
+        });
+        logRequest(route.platform, route.modelId, route.keyId, 'success', promptTokens, completionTokens, Date.now() - start, null);
         return;
       }
     } catch (err: any) {
       const latency = Date.now() - start;
       const safeError = sanitizeProviderErrorMessage(err.message);
+      traceRouteEvent('Responses', {
+        event: 'fail',
+        requestId: requestGroupId,
+        attempt,
+        platform: route.platform,
+        model: route.modelId,
+        latencyMs: latency,
+        error: safeError,
+      });
       logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, 0, latency, safeError);
 
       // Mid-stream failures can't be retried (bytes already sent) — close cleanly.
@@ -752,7 +819,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         return;
       }
 
-      if (isRetryableError(err)) {
+      if (isRetryableError(err) || isProviderAuthFailoverError(err)) {
         // Model-level 404: rule out the whole model for this request — its
         // other keys would 404 the same way. (PR #111, credits @barbotkonv.)
         if (isModelNotFoundError(err) || isModelAccessForbiddenError(err)) skipModels.add(route.modelDbId);

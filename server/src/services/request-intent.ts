@@ -126,3 +126,40 @@ export function detectRequestIntent(messages: ChatMessage[], tools?: ToolLike[])
     chat,
   };
 }
+
+export function isAutoModel(modelId: string | undefined): boolean {
+  if (!modelId) return true;
+  const lower = modelId.toLowerCase();
+  return (
+    lower === 'auto' ||
+    lower.startsWith('auto:') ||
+    lower === 'coding' ||
+    lower === 'thinking' ||
+    lower === 'agentic' ||
+    lower === 'research' ||
+    lower === 'reasoning'
+  );
+}
+
+export function overrideIntentFromModel(intent: RequestIntent, modelId: string | undefined): RequestIntent {
+  if (!modelId) return intent;
+  const lower = modelId.toLowerCase();
+  if (lower === 'coding' || lower === 'auto:coding') {
+    return { kind: 'coding', coding: true, agentic: false, research: false, chat: false };
+  }
+  if (lower === 'agentic' || lower === 'auto:agentic') {
+    return { kind: 'agentic', coding: true, agentic: true, research: false, chat: false };
+  }
+  if (
+    lower === 'thinking' ||
+    lower === 'auto:thinking' ||
+    lower === 'research' ||
+    lower === 'auto:research' ||
+    lower === 'reasoning' ||
+    lower === 'auto:reasoning'
+  ) {
+    return { kind: 'research', coding: false, agentic: false, research: true, chat: false };
+  }
+  return intent;
+}
+
