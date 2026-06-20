@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { migrateDbSchema } from './migrations.js';
+import { resolveDefaultDbPath } from '../env.js';
+import { hasRemoteSecretsStore, scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 
 const DB_PATH = resolveDefaultDbPath();
 

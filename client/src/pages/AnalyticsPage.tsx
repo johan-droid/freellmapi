@@ -50,6 +50,13 @@ function formatTokens(n?: number): string {
   return String(n)
 }
 
+function compactLabel(val: string | null | undefined): string {
+  if (!val) return '—';
+  const parts = val.split('/');
+  const last = parts[parts.length - 1];
+  return last.replace(/_/g, ' ');
+}
+
 function Stat({ label, value, hint, className }: { label: string; value: string | number; hint?: string; className?: string }) {
   const card = (
     <div className="rounded-3xl border bg-card px-4 py-3">
@@ -104,6 +111,12 @@ export default function AnalyticsPage() {
   const { data: errors = [] } = useQuery({
     queryKey: ['analytics', 'errors', range],
     queryFn: () => apiFetch<any[]>(`/api/analytics/errors?range=${range}`),
+  })
+
+  const { data: brokerLive } = useQuery<BrokerLive>({
+    queryKey: ['analytics', 'broker-live'],
+    queryFn: () => apiFetch<BrokerLive>('/api/analytics/broker/live'),
+    refetchInterval: 5000,
   })
 
   const { data: errorDist } = useQuery({
@@ -308,7 +321,7 @@ export default function AnalyticsPage() {
               <p className="text-sm text-muted-foreground text-center py-8">No model lifecycle events</p>
             ) : (
               <div className="space-y-3">
-                {brokerLive.recentModelChanges.map((row, i) => (
+                {brokerLive.recentModelChanges.map((row: any, i: number) => (
                   <div key={`${row.providerSlug}-${row.modelId}-${i}`} className="border-b pb-3 last:border-0 last:pb-0">
                     <div className="flex items-center justify-between gap-2">
                       <Badge variant={row.changeType.includes('disabled') || row.changeType.includes('removed') ? 'destructive' : 'outline'}>

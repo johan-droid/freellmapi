@@ -3,16 +3,22 @@ installLogRedaction();
 
 import { createApp } from './app.js';
 import { initDb, getSetting } from './db/index.js';
+import { hardenDatabase } from './db/hardening.js';
+import { hasRemoteSecretsStore } from './services/remote-secrets.js';
 import { startHealthChecker } from './services/health.js';
-import { applyProxyUrl, applyProxyEnabled, applyProxyBypass } from './lib/proxy.js';
+import { getDatabasePath, restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
 import { startCatalogSync } from './services/catalog-sync.js';
+import { applyProxyUrl, applyProxyEnabled, applyProxyBypass } from './lib/proxy.js';
 
 const PORT = process.env.PORT ?? 3001;
 // IPv4-only ('0.0.0.0') by default so Render can detect the bound port.
 const HOST = process.env.HOST ?? '0.0.0.0';
 
 async function main() {
-  initDb();
+  await restoreDatabaseBeforeBoot();
+  const db = initDb(getDatabasePath());
+  hardenDatabase(db);
+  const stopSnapshots = startDatabaseSnapshotLoop();
 
   // Load the persisted proxy settings from the DB (env var wins if set).
   // Must happen after initDb so the settings table is ready.
