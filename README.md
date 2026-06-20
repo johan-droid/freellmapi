@@ -2,7 +2,7 @@
 
 # FreeLLMAPI
 
-**One OpenAI-compatible endpoint. Sixteen free LLM providers. ~1.7B tokens per month.**
+**One OpenAI-compatible endpoint. Sixteen free LLM providers. ~1.6B tokens per month.**
 
 Aggregate the free tiers from Google, Groq, Cerebras, NVIDIA, Mistral, OpenRouter, GitHub Models, Cohere, Cloudflare, HuggingFace, Z.ai (Zhipu), Ollama, Kilo, Pollinations, LLM7, OVH AI Endpoints, and OpenCode Zen — plus any custom OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, local Ollama) — behind a single `/v1/chat/completions` endpoint. Keys are stored encrypted. A router picks the best available model for each request, falls over to the next provider when one is rate-limited, and tracks per-key usage so you stay under every free-tier cap.
 
@@ -40,7 +40,7 @@ Aggregate the free tiers from Google, Groq, Cerebras, NVIDIA, Mistral, OpenRoute
 
 ## Why this exists
 
-Every serious AI lab now offers a free tier — a few million tokens a month, a few thousand requests a day. On its own each tier is a toy. Stacked together, they add up to roughly **1.7 billion tokens per month** of working inference capacity, across 100+ models from small-and-fast to reasonably capable.
+Every serious AI lab now offers a free tier — a few million tokens a month, a few thousand requests a day. On its own each tier is a toy. Stacked together, they add up to roughly **1.6 billion tokens per month** of working inference capacity, across 100+ models from small-and-fast to reasonably capable. The exact total moves when providers are added, pruned, or disabled.
 
 The problem is that stacking them by hand is painful: seventeen different SDKs, seventeen different rate limits, seventeen places a request can fail. FreeLLMAPI collapses that into one OpenAI-compatible endpoint. Point any OpenAI client library at your local server, and it routes transparently across whichever providers you've added keys for.
 
@@ -92,6 +92,7 @@ Plus a **custom** provider — point at any OpenAI-compatible endpoint (llama.cp
 - **Per-key rate tracking** — RPM, RPD, TPM, and TPD counters per `(platform, model, key)` so the router always picks a key that's under its caps.
 - **Sticky sessions** — Multi-turn conversations keep talking to the same model for 30 minutes to avoid the hallucination spike that comes from mid-conversation model switches.
 - **Encrypted key storage** — API keys are encrypted with AES-256-GCM before hitting SQLite; decryption happens in-memory just before a request.
+- **Optional Neon/Postgres mirror** — Set `DATABASE_URL` to mirror `settings` and `api_keys` to Neon/Postgres while keeping SQLite as the local runtime cache.
 - **Unified API key** — Clients authenticate to your proxy with a single `freellmapi-…` bearer token. You never expose upstream provider keys to your apps.
 - **Dashboard login** — The admin UI and all `/api/*` routes are gated behind an email + password account (scrypt-hashed, session-token auth), set on first run. The `/v1` proxy keeps its own unified-key auth for apps.
 - **Health checks** — Periodic probes mark keys as `healthy`, `rate_limited`, `invalid`, or `error` so the router skips dead ones automatically.
@@ -162,9 +163,16 @@ printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 npm run dev
 ```
 
-`ENCRYPTION_KEY` is required for startup. The server only falls back to a
-database-stored development key when `DEV_MODE=true` and `NODE_ENV` is not
-`production`; do not use that fallback with real provider keys.
+`ENCRYPTION_KEY` should be set to a stable 64-char hex key for any real usage.
+In non-production, the server can fall back to a database-stored development
+key, but you should not rely on that fallback for provider keys you care about.
+If you prefer to keep machine-local overrides out of Git, put the real
+`ENCRYPTION_KEY` in `.env.local`; the server now loads `.env` and `.env.local`
+with `.env.local` taking precedence.
+
+If you want Neon/Postgres as the durable secret store, set `DATABASE_URL` too.
+The app will hydrate `settings` and `api_keys` from Postgres on boot, keep the
+SQLite file as the fast local cache, and mirror key changes back after saves.
 
 Request analytics are retained for 90 days or 100000 request rows by default,
 whichever limit prunes first. Set `REQUEST_ANALYTICS_RETENTION_DAYS=0` or
@@ -200,7 +208,7 @@ docker compose logs -f freellmapi
 
 By default the container's port is bound to `127.0.0.1` (localhost only). To reach the dashboard/API from another machine on your network, publish it on all interfaces with `HOST_BIND=0.0.0.0 docker compose up -d` — only on a trusted LAN, since the proxy is single-user.
 
-SQLite data is stored in the `freellmapi-data` volume at `/app/server/data`. Keep the same `.env` `ENCRYPTION_KEY` and volume when upgrading, because provider keys are encrypted at rest.
+SQLite data is stored in the `freellmapi-data` volume at `/app/server/data`. Keep the same `.env` `ENCRYPTION_KEY` and volume when upgrading, because provider keys are encrypted at rest. If `DATABASE_URL` is set, `settings` and `api_keys` are mirrored to Neon/Postgres as the restart-safe secret store.
 
 More Docker operations and examples live in [docker/README.md](./docker/README.md).
 
@@ -600,3 +608,14 @@ Removed since the April 2026 review: Hugging Face, Moonshot, and MiniMax direct 
 ## License
 
 [MIT](./LICENSE)
+
+## Development Guidelines
+
+When contributing to this project, please adhere to the following guidelines:
+
+- **Zero Backend Disruption:** Do not change backend query parameters, data endpoints, schemas, or existing state objects. Use client-side state hooks for new UI session adjustments.
+- **Mobile-First & Dark-Mode UI:** UI layout changes must strictly follow a Mobile-First paradigm (design for 360px-430px first, progressively enhance) using responsive Tailwind base classes. No desktop-only layouts, horizontal overflow, or wide tables (use mobile card/list alternatives). Ensure elements stack cleanly, modals fit screens, charts resize properly, and buttons are thumb-friendly (min 44x44px tap targets) with smooth rounded-3xl or rounded-full edges. Emphasize a premium dark-mode aesthetic utilizing glassmorphism textures (e.g., `bg-card/70 backdrop-blur-md border-border/80`).
+- **Strict Dependency Containment:** Do not add foreign or unmanaged code libraries. Depend completely on native layout utilities and pre-configured component tools.
+- **Docker constraints:** Avoid using external BuildKit syntax directives (e.g., `# syntax=docker/dockerfile:...`) in the Dockerfile to prevent 'grpc server closed unexpectedly' or rate limit errors in Render or CI environments.
+- **Architecture:** The 'freellmapi' repository is a Unified LLM Router utilizing React, Vite, Tailwind CSS, Shadcn/UI, and Recharts, structured with npm workspaces ('client', 'server', 'shared').
+- **Testing & Execution:** Build the frontend using `npm run build -w client`. Run tests across the project with `npm run test`.

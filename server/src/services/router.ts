@@ -985,7 +985,10 @@ export function getRoutingScores(): { strategy: RoutingStrategy; weights: Routin
            m.supports_tools, m.context_window
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE m.enabled = 1
+      AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
   `).all() as ChainRow[];
 
   // For display we score under 'balanced' weights when in priority mode, so the
@@ -1030,7 +1033,10 @@ export function hasEnabledVisionModel(): boolean {
     SELECT COUNT(*) as cnt
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE fc.enabled = 1 AND m.enabled = 1 AND m.supports_vision = 1
+      AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
   `).get() as { cnt: number };
   return row.cnt > 0;
 }
@@ -1044,7 +1050,10 @@ export function hasEnabledToolsModel(): boolean {
     SELECT COUNT(*) as cnt
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE fc.enabled = 1 AND m.enabled = 1 AND m.supports_tools = 1
+      AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
   `).get() as { cnt: number };
   return row.cnt > 0;
 }

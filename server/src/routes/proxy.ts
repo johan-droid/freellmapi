@@ -378,6 +378,18 @@ const chatCompletionSchema = z.object({
 // proxy-retry.test.ts) that pull them from this module.
 export { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError };
 
+export function isProviderAuthFailoverError(err: any): boolean {
+  const msg = (err.message ?? '').toLowerCase();
+  return msg.includes('api error 401')
+    || msg.includes('api error 403')
+    || msg.includes('authentication error')
+    || msg.includes('unauthorized')
+    || msg.includes('invalid api key')
+    || msg.includes('invalid authentication')
+    || msg.includes('invalid token')
+    || msg.includes('access forbidden');
+}
+
 // Pull the incremental text out of a streaming chunk for token counting.
 // Must tolerate chunks that carry no `choices` array at all: some providers
 // (e.g. Groq) emit usage/keepalive frames shaped like `{usage:{...}}` with no
@@ -599,6 +611,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const wantsTools = (tools?.length ?? 0) > 0;
   const requestIntent = detectRequestIntent(messages, tools);
   if (wantsTools && !hasEnabledToolsModel()) {
+    applyBrokerHeaders(res, brokerContext);
     res.status(422).json({
       error: {
         message: 'This request includes tools, but no tool-capable model is enabled. Enable a tool-calling model (e.g. GPT-OSS 120B, Gemini 3.5 Flash, GLM-4.7) in the Fallback Chain.',
@@ -735,12 +748,21 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
   } else if (requestedModel) {
     const db = getDb();
-    const enabled = db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel) as { id: number } | undefined;
+    const enabled = brokerContext.aliasTarget?.providerSlug
+      ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? AND enabled = 1')
+        .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+      : db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1')
+        .get(effectiveRequestedModel) as { id: number } | undefined;
     if (enabled) {
       preferredModel = enabled.id;
     } else {
-      const disabled = db.prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel) as { id: number } | undefined;
+      const disabled = brokerContext.aliasTarget?.providerSlug
+        ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?')
+          .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
+        : db.prepare('SELECT id FROM models WHERE model_id = ?')
+          .get(effectiveRequestedModel) as { id: number } | undefined;
       const reason = disabled ? 'is disabled' : 'is not in the catalog';
+      applyBrokerHeaders(res, brokerContext);
       res.status(400).json({
         error: {
           message: `Model '${requestedModel}' ${reason}. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
@@ -785,6 +807,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         requestIntent,
       );
     } catch (err: any) {
+      applyBrokerHeaders(res, brokerContext);
+      logRouteDecision(brokerContext, null, {
+        status: 'error',
+        fallbackAttempts: attempt,
+        reason: lastError ? sanitizeProviderErrorMessage(lastError.message) : sanitizeProviderErrorMessage(err.message),
+      });
       // No more models available
       if (lastError) {
         const safeLastError = sanitizeProviderErrorMessage(lastError.message);
@@ -1090,8 +1118,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         setStickyModel(messages, route.modelDbId, sessionIdHeader, strategyKey);
         if (handoffMode !== 'off' && sessionKey) recordSuccessfulModel({ sessionKey, modelKey });
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyBrokerHeaders(res, brokerContext, route, attempt);
         // Repair double-encoded tool arguments against the request's tool
         // schemas (e.g. GLM emitting an array parameter as a JSON string),
         // so strict clients don't reject the call. Schema-gated — a true
@@ -1106,6 +1133,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         }
         // Normalize array-shaped message.content to a string on the way out (#166).
         res.json(normalizeOutboundContent(result));
+        logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'completion_completed' });
 
         logRequest(
           route.platform, route.modelId, route.keyId, 'success',
@@ -1149,13 +1177,17 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
                 tpd: route.tpdLimit,
               }, err.retryAfterMs),
         );
-        recordRateLimitHit(route.modelDbId);
+        if (!isProviderAuthFailoverError(err)) {
+          recordRateLimitHit(route.modelDbId);
+        }
         lastError = err;
         console.log(`[Proxy] ${safeError.slice(0, 60)} from ${route.displayName}, falling back (attempt ${attempt + 1}/${MAX_RETRIES})`);
         continue;
       }
 
       // Non-retryable error (auth, 4xx, etc.): don't retry
+      applyBrokerHeaders(res, brokerContext, route, attempt);
+      logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: safeError });
       res.status(502).json({
         error: {
           message: `Provider error (${route.displayName}): ${safeError}`,
@@ -1167,6 +1199,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   }
 
   // Exhausted all retries
+  applyBrokerHeaders(res, brokerContext);
+  logRouteDecision(brokerContext, null, {
+    status: 'error',
+    fallbackAttempts: MAX_RETRIES,
+    reason: `exhausted: ${sanitizeProviderErrorMessage(lastError?.message)}`,
+  });
   res.status(429).json({
     error: {
       message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,

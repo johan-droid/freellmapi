@@ -13,7 +13,6 @@ import { Pencil, ExternalLink, Globe } from 'lucide-react'
 import { formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
 
-// Small "Get API key" external link shown next to a provider (#137).
 function GetKeyLink({ url }: { url: string }) {
   const { t } = useI18n()
   if (!url) return null
@@ -22,7 +21,7 @@ function GetKeyLink({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
     >
       {t('keys.getApiKey')}
       <ExternalLink className="size-3" />
@@ -30,12 +29,6 @@ function GetKeyLink({ url }: { url: string }) {
   )
 }
 
-// `url` points to each provider's key-management / signup page so the Keys page
-// can show a "Get API key" shortcut (#137). OpenCode Zen's key is free from
-// opencode.ai/auth — no card needed; billing only applies to paid models (#128).
-// `keyless: true` providers (Kilo's anonymous free tier) need no API key — the
-// form disables the key field and submits a sentinel the backend stores so
-// routing treats the platform as configured.
 const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolean }[] = [
   { value: 'google', label: 'Google AI Studio', url: 'https://aistudio.google.com/apikey' },
   { value: 'groq', label: 'Groq', url: 'https://console.groq.com/keys' },
@@ -58,8 +51,6 @@ const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolea
   { value: 'reka', label: 'Reka (free key)', url: 'https://platform.reka.ai' },
 ]
 
-// 'custom' is configured through its own form (base URL + model), not the
-// generic key dropdown — but it still appears in the grouped provider list.
 const CUSTOM_GROUP: { value: Platform; label: string; url: string } = {
   value: 'custom',
   label: 'Custom (OpenAI-compatible)',
@@ -149,27 +140,34 @@ function QuotaSignalsSection({ states }: { states: ProviderQuotaState[] }) {
 function UnifiedKeySection() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
-  const [showKey, setShowKey] = useState(false)
+  const [revealedKey, setRevealedKey] = useState('')
   const [copied, setCopied] = useState(false)
 
-  const { data, isError } = useQuery<{ apiKey: string }>({
+  const { data, isError } = useQuery<{ maskedKey: string; prefix: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
   })
 
-  const regenerate = useMutation({
-    mutationFn: () => apiFetch('/api/settings/api-key/regenerate', { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['unified-key'] }),
+  const reveal = useMutation<{ apiKey: string }>({
+    mutationFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
+    onSuccess: (payload) => setRevealedKey(payload.apiKey),
   })
 
-  const apiKey = data?.apiKey ?? ''
-  const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(32) : '…'
+  const regenerate = useMutation<{ apiKey: string; maskedKey: string }>({
+    mutationFn: () => apiFetch('/api/settings/api-key/regenerate', { method: 'POST' }),
+    onSuccess: (payload) => {
+      setRevealedKey(payload.apiKey)
+      queryClient.invalidateQueries({ queryKey: ['unified-key'] })
+    },
+  })
+
   const baseUrl = import.meta.env.DEV
     ? `http://${window.location.hostname}:${__SERVER_PORT__}/v1`
     : `${window.location.origin}/v1`
 
-  function copy() {
-    navigator.clipboard.writeText(apiKey)
+  async function copy() {
+    const key = revealedKey || (await reveal.mutateAsync()).apiKey
+    await navigator.clipboard.writeText(key)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -186,6 +184,7 @@ function UnifiedKeySection() {
         <Button
           variant="ghost"
           size="sm"
+          className="w-full sm:w-auto"
           onClick={() => regenerate.mutate()}
           disabled={regenerate.isPending || isError}
         >
@@ -198,9 +197,9 @@ function UnifiedKeySection() {
           {t('keys.serverUnreachableBefore')}<code className="font-mono">{baseUrl.replace('/v1', '')}</code>{t('keys.serverUnreachableAfter')}
         </div>
       ) : (
-        <div className="flex items-center gap-2">
-          <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-lg select-all truncate tabular-nums">
-            {showKey ? apiKey : masked}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs tabular-nums">
+            {revealedKey || data?.maskedKey || '…'}
           </code>
           <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)}>
             {showKey ? t('keys.hideKey') : t('keys.showKey')}
@@ -352,6 +351,7 @@ function CustomProviderSection() {
       queryClient.invalidateQueries({ queryKey: ['models'] })
       setModel('')
       setDisplayName('')
+      setApiKey('')
     },
   })
 
@@ -418,9 +418,57 @@ function CustomProviderSection() {
           {addCustom.isPending ? t('keys.addingCustom') : multiple ? t('keys.addModels', { count: models.length }) : t('keys.addModel')}
         </Button>
       </form>
-      {addCustom.isError && (
-        <p className="text-destructive text-xs mt-2">{(addCustom.error as Error).message}</p>
-      )}
+      {addCustom.isError && <p className="mt-2 text-xs text-destructive">{(addCustom.error as Error).message}</p>}
+    </section>
+  )
+}
+
+
+function PersistenceStatusBanner() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['storage'],
+    queryFn: () => apiFetch('/api/storage').then(r => (r as Response).json()),
+  })
+
+  if (isLoading || !data) return null;
+
+  const p = data.persistence;
+  const isFresh = p.restoreStatus === 'fresh';
+  const hasError = p.lastBackupError !== null || !p.configured;
+
+  return (
+    <section className="mb-6 space-y-2">
+      <h2 className="text-sm font-medium">Persistence & Backup Health</h2>
+      <div className={`rounded-xl border p-4 text-xs ${hasError ? 'bg-destructive/10 border-destructive/30' : (isFresh ? 'bg-amber-500/10 border-amber-500/30' : 'bg-card')}`}>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div>
+            <span className="text-muted-foreground block">DB Path</span>
+            <span className="font-mono">{p.path}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground block">Restore Status</span>
+            <span className="capitalize">{p.restoreStatus}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground block">Last Backup</span>
+            <span>{p.lastBackupTime ? new Date(p.lastBackupTime).toLocaleString() : 'Never'}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground block">Size</span>
+            <span>{(p.size / 1024).toFixed(1)} KB</span>
+          </div>
+        </div>
+        {hasError && (
+          <p className="mt-2 text-destructive font-medium">
+            Warning: Remote persistence is not configured or failed (${p.lastBackupError || 'Not configured'}). Your keys will be lost on container restart.
+          </p>
+        )}
+        {isFresh && !hasError && (
+          <p className="mt-2 text-amber-600 dark:text-amber-400 font-medium">
+            Notice: Loaded from a fresh DB. If you expected existing keys, check your remote storage config.
+          </p>
+        )}
+      </div>
     </section>
   )
 }
@@ -437,20 +485,11 @@ export default function KeysPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
 
-  const { data: keys = [], isLoading } = useQuery<ApiKey[]>({
-    queryKey: ['keys'],
-    queryFn: () => apiFetch('/api/keys'),
-  })
-
-  const { data: healthData } = useQuery<HealthData>({
-    queryKey: ['health'],
-    queryFn: () => apiFetch('/api/health'),
-    refetchInterval: 30000,
-  })
+  const { data: keys = [], isLoading } = useQuery<ApiKey[]>({ queryKey: ['keys'], queryFn: () => apiFetch('/api/keys') })
+  const { data: healthData } = useQuery<HealthData>({ queryKey: ['health'], queryFn: () => apiFetch('/api/health'), refetchInterval: 30000 })
 
   const addKey = useMutation({
-    mutationFn: (body: { platform: string; key: string; label?: string }) =>
-      apiFetch('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
+    mutationFn: (body: { platform: string; key: string; label?: string }) => apiFetch('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['keys'] })
       queryClient.invalidateQueries({ queryKey: ['health'] })
@@ -467,6 +506,7 @@ export default function KeysPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['keys'] })
       queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
     },
   })
 
@@ -487,11 +527,7 @@ export default function KeysPage() {
   })
 
   const togglePlatform = useMutation({
-    mutationFn: ({ platform, enabled }: { platform: string; enabled: boolean }) =>
-      apiFetch(`/api/keys/platform/${platform}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled }),
-      }),
+    mutationFn: ({ platform, enabled }: { platform: string; enabled: boolean }) => apiFetch(`/api/keys/platform/${platform}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['keys'] })
       queryClient.invalidateQueries({ queryKey: ['health'] })
@@ -500,11 +536,7 @@ export default function KeysPage() {
   })
 
   const updateKey = useMutation({
-    mutationFn: ({ id, label }: { id: number; label: string }) =>
-      apiFetch(`/api/keys/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ label }),
-      }),
+    mutationFn: ({ id, label }: { id: number; label: string }) => apiFetch(`/api/keys/${id}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['keys'] })
       setEditingKeyId(null)
@@ -523,15 +555,11 @@ export default function KeysPage() {
   }
 
   function saveEditing(id: number) {
-    if (editingLabel !== undefined) {
-      updateKey.mutate({ id, label: editingLabel })
-    }
+    updateKey.mutate({ id, label: editingLabel })
   }
 
   useEffect(() => {
-    if (editingKeyId !== null && editInputRef.current) {
-      editInputRef.current.focus()
-    }
+    if (editingKeyId !== null && editInputRef.current) editInputRef.current.focus()
   }, [editingKeyId])
 
   const needsAccountId = platform === 'cloudflare'
@@ -542,7 +570,6 @@ export default function KeysPage() {
     if (!platform) return
     if (!isKeyless && !apiKey) return
     if (needsAccountId && !accountId) return
-    // Keyless providers submit an empty key; the backend stores a sentinel.
     const key = isKeyless ? '' : (needsAccountId ? `${accountId}:${apiKey}` : apiKey)
     addKey.mutate({ platform, key, label: label || undefined })
   }
@@ -574,7 +601,7 @@ export default function KeysPage() {
   })).filter(p => p.keys.length > 0)
 
   return (
-    <div>
+    <div className="min-w-0">
       <PageHeader
         title={t('keys.pageTitle')}
         description={t('keys.pageDescription')}
@@ -588,6 +615,7 @@ export default function KeysPage() {
       />
 
       <div className="space-y-8">
+        <PersistenceStatusBanner />
         <UnifiedKeySection />
 
         <ProxySettingsSection />
@@ -634,6 +662,7 @@ export default function KeysPage() {
                 placeholder={isKeyless ? t('keys.noKeyNeededPlaceholder') : (needsAccountId ? t('keys.bearerTokenPlaceholder') : t('keys.pasteKeyPlaceholder'))}
                 className="font-mono text-xs"
                 disabled={isKeyless}
+                autoComplete="off"
               />
               {isKeyless && (
                 <p className="text-[11px] text-muted-foreground">
@@ -656,9 +685,7 @@ export default function KeysPage() {
               </div>
             </div>
           </form>
-          {addKey.isError && (
-            <p className="text-destructive text-xs mt-2">{(addKey.error as Error).message}</p>
-          )}
+          {addKey.isError && <p className="mt-2 text-xs text-destructive">{(addKey.error as Error).message}</p>}
         </section>
 
         <CustomProviderSection />
@@ -703,16 +730,19 @@ export default function KeysPage() {
                       {t(group.keys.length === 1 ? 'keys.keyCountOne' : 'keys.keyCountOther', { count: group.keys.length })}
                     </span>
                   </div>
-                  <div className="rounded-2xl border divide-y bg-card overflow-hidden">
+                  <div className="overflow-hidden rounded-2xl border bg-card sm:divide-y">
                     {group.keys.map(k => {
                       const h = healthKeyMap.get(k.id)
                       const status = h?.status ?? k.status
                       const lastChecked = h?.lastCheckedAt
                       const isEditing = editingKeyId === k.id
                       return (
-                        <div key={k.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
-                          <span className={`size-1.5 rounded-full flex-shrink-0 ${statusDot[status] ?? statusDot.unknown}`} />
-                          <code className="text-xs font-mono flex-shrink-0">{k.maskedKey}</code>
+                        <div key={k.id} className="grid gap-3 border-b px-4 py-3 last:border-b-0 sm:flex sm:items-center sm:border-b-0 sm:hover:bg-muted/40">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span className={`size-1.5 shrink-0 rounded-full ${statusDot[status] ?? statusDot.unknown}`} />
+                            <code className="min-w-0 truncate font-mono text-xs">{k.maskedKey}</code>
+                            <span className="shrink-0 text-xs text-muted-foreground">{statusLabel[status] ?? status}</span>
+                          </div>
                           {isEditing ? (
                             <Input
                               ref={editInputRef}
@@ -723,7 +753,7 @@ export default function KeysPage() {
                                 if (e.key === 'Escape') cancelEditing()
                               }}
                               onBlur={() => saveEditing(k.id)}
-                              className="h-6 w-[160px] text-xs"
+                              className="h-8 text-xs sm:w-[180px]"
                               disabled={updateKey.isPending}
                             />
                           ) : (

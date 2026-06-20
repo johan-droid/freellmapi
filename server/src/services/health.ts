@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import { resolveProvider } from '../providers/index.js';
 import { decrypt } from '../lib/crypto.js';
+import { scheduleHydrateSecretsToRemote } from './remote-secrets.js';
 import type { Platform, KeyStatus } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey } from './provider-quota.js';
 
@@ -18,6 +19,7 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
   const provider = resolveProvider(row.platform as Platform, row.base_url);
   if (!provider) return 'error';
 
+
   try {
     const apiKey = decrypt(row.encrypted_key, row.iv, row.auth_tag);
     const isValid = await provider.validateKey(apiKey, {
@@ -27,6 +29,7 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
       endpoint: 'models',
       origin: 'health',
     });
+
 
     const status: KeyStatus = isValid ? 'healthy' : 'invalid';
 
@@ -66,6 +69,8 @@ export async function checkAllKeys(): Promise<void> {
   for (const key of keys) {
     await checkKeyHealth(key.id);
   }
+
+  scheduleHydrateSecretsToRemote(db);
 
   console.log(`[Health] Check complete.`);
 }

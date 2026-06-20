@@ -26,13 +26,22 @@ settingsRouter.put('/fusion', (req: Request, res: Response) => {
 
 // Get the unified API key
 settingsRouter.get('/api-key', (_req: Request, res: Response) => {
+  const apiKey = getUnifiedApiKey();
+  res.json({ maskedKey: maskKey(apiKey), prefix: apiKey.slice(0, 'freellmapi-'.length) });
+});
+
+// Explicit reveal endpoint for the dashboard. Still behind requireAuth in
+// app.ts, but separated from the default metadata path to avoid accidental leaks
+// through eager query caches, devtools snapshots, or page-load logging.
+settingsRouter.post('/api-key/reveal', (_req: Request, res: Response) => {
   res.json({ apiKey: getUnifiedApiKey() });
 });
 
-// Regenerate the unified API key
+// Regenerate the unified API key. This intentionally returns the new key once so
+// the user can copy it immediately; subsequent GET requests remain masked.
 settingsRouter.post('/api-key/regenerate', (_req: Request, res: Response) => {
   const newKey = regenerateUnifiedKey();
-  res.json({ apiKey: newKey });
+  res.json({ apiKey: newKey, maskedKey: maskKey(newKey) });
 });
 
 // Get the proxy settings

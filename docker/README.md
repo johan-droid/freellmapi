@@ -76,8 +76,9 @@ docker compose up -d --build
 | --- | --- | --- | --- |
 | `ENCRYPTION_KEY` | Yes | None | 64-character hex key used to encrypt provider API keys at rest. Generate it once and keep it stable. |
 | `PORT` | No | `3001` | Host port exposed by Docker Compose. The container listens on port 3001. |
+| `DATABASE_URL` | No | None | Optional Neon/Postgres mirror for `settings` and `api_keys`. SQLite remains the local runtime cache. |
 
-The `freellmapi-data` volume stores SQLite data at `/app/server/data`. Keep the same volume and `ENCRYPTION_KEY` when upgrading, otherwise existing encrypted provider keys cannot be decrypted.
+The `freellmapi-data` volume stores SQLite data at `/app/server/data`. Keep the same volume and `ENCRYPTION_KEY` when upgrading, otherwise existing encrypted provider keys cannot be decrypted. If `DATABASE_URL` is set, the app will hydrate secret state from Postgres on boot and mirror future key changes back to it.
 
 ## Published Image
 
@@ -88,3 +89,7 @@ docker pull ghcr.io/tashfeenahmed/freellmapi:latest
 ```
 
 The Docker workflow builds pull requests without pushing. After this repository receives the workflow on `main`, pushes to `main` and version tags publish images to GHCR automatically.
+
+## Development Guidelines
+
+Please refer to the [root README.md](../README.md#development-guidelines) for project-wide development constraints, including our Mobile-First & Dark-Mode UI requirements, Zero Backend Disruption rule, and Strict Dependency Containment policies. Additionally, please ensure you avoid using external BuildKit syntax directives (e.g., `# syntax=docker/dockerfile:...`) in the Dockerfile to prevent 'grpc server closed unexpectedly' or rate limit errors in Render or CI environments.

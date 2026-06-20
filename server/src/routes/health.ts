@@ -65,11 +65,13 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
   }
 
   const status = await checkKeyHealth(keyId);
+  scheduleHydrateSecretsToRemote(getDb());
   res.json({ keyId, status });
 });
 
 // Check all keys
 healthRouter.post('/check-all', async (_req: Request, res: Response) => {
   await checkAllKeys();
+  scheduleHydrateSecretsToRemote(getDb());
   res.json({ success: true });
 });

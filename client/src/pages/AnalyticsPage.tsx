@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PageHeader } from '@/components/page-header'
 import { Tooltip as HoverTooltip } from '@/components/tooltip'
@@ -13,6 +14,34 @@ import { formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
 
 type TimeRange = '24h' | '7d' | '30d'
+
+interface BrokerLive {
+  requestStats: {
+    requests5m: number
+    success5m: number
+    error5m: number
+    tokens5m: number
+    avgLatencyMs: number
+  }
+  activeSessions: number
+  clientMix: { clientProfile: string; count: number }[]
+  workloadMix: { workload: string; count: number }[]
+  routeTimeline: { minute: string; routes: number; routed: number; unrouted: number }[]
+  recentDecisions: {
+    requestId: string
+    clientProfile: string
+    workload: string
+    providerSlug: string | null
+    modelId: string | null
+    fallbackAttempts: number
+    routeReason: { status?: string; reasons?: string[]; note?: string | null }
+    winnerReason: string | null
+    createdAt: string
+  }[]
+  lifecycle: { status: string; count: number }[]
+  probeHealth: { status: string; count: number }[]
+  recentModelChanges: { providerSlug: string; modelId: string; changeType: string; detectedAt: string }[]
+}
 
 function formatTokens(n?: number): string {
   if (!n) return '0'
@@ -141,6 +170,162 @@ export default function AnalyticsPage() {
       />
 
       <div className="space-y-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <Stat label="Live routes" value={brokerLive?.requestStats.requests5m ?? 0} />
+          <Stat label="Active sessions" value={brokerLive?.activeSessions ?? 0} />
+          <Stat label="Live tokens" value={formatTokens(brokerLive?.requestStats.tokens5m)} />
+          <Stat label="Live errors" value={brokerLive?.requestStats.error5m ?? 0} className={(brokerLive?.requestStats.error5m ?? 0) > 0 ? 'text-destructive' : ''} />
+          <Stat label="Live latency" value={`${brokerLive?.requestStats.avgLatencyMs ?? 0} ms`} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Panel title="Broker route flow">
+              {!brokerLive?.routeTimeline?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No live route decisions yet</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={brokerLive.routeTimeline} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
+                    <XAxis dataKey="minute" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
+                    <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
+                    <Line type="monotone" dataKey="routed" name="Routed" stroke={primaryFill} strokeWidth={1.5} dot={false} />
+                    <Line type="monotone" dataKey="unrouted" name="Unrouted" stroke="var(--destructive)" strokeWidth={1.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </Panel>
+          </div>
+
+          <Panel title="Lifecycle guard">
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Provider catalog</p>
+                <div className="flex flex-wrap gap-2">
+                  {(brokerLive?.lifecycle?.length ? brokerLive.lifecycle : [{ status: 'active', count: 0 }]).map(item => (
+                    <Badge key={item.status} variant={item.status === 'active' ? 'secondary' : item.status === 'removed' ? 'destructive' : 'outline'}>
+                      {compactLabel(item.status)} {item.count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Probe health</p>
+                <div className="flex flex-wrap gap-2">
+                  {(brokerLive?.probeHealth?.length ? brokerLive.probeHealth : [{ status: 'no probes', count: 0 }]).map(item => (
+                    <Badge key={item.status} variant={item.status === 'pass' ? 'secondary' : item.status === 'fail' ? 'destructive' : 'outline'}>
+                      {compactLabel(item.status)} {item.count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Panel title="Client profile mix">
+            {!brokerLive?.clientMix?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No client signals yet</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={brokerLive.clientMix} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
+                  <XAxis dataKey="clientProfile" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
+                  <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                  <Bar dataKey="count" fill={primaryFill} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Panel>
+
+          <Panel title="Workload mix">
+            {!brokerLive?.workloadMix?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No workload signals yet</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={brokerLive.workloadMix} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
+                  <XAxis dataKey="workload" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
+                  <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                  <Bar dataKey="count" fill="var(--muted-foreground)" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Panel title="Recent route decisions">
+              {!brokerLive?.recentDecisions?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No route decisions yet</p>
+              ) : (
+                <div className="max-h-[320px] overflow-y-auto -mx-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4">Client</TableHead>
+                        <TableHead>Workload</TableHead>
+                        <TableHead>Route</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead className="text-right pr-4">Time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {brokerLive.recentDecisions.map((row) => (
+                        <TableRow key={`${row.requestId}-${row.createdAt}`}>
+                          <TableCell className="pl-4 text-xs">{compactLabel(row.clientProfile)}</TableCell>
+                          <TableCell className="text-xs">{compactLabel(row.workload)}</TableCell>
+                          <TableCell className="text-xs">
+                            {row.providerSlug && row.modelId ? (
+                              <span className="font-mono">{row.providerSlug}/{row.modelId}</span>
+                            ) : (
+                              <span className="text-destructive">unrouted</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground">
+                            {(row.routeReason.reasons ?? []).join(', ') || row.winnerReason || row.routeReason.note || 'routed'}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground tabular-nums pr-4">
+                            {formatSqliteUtcToLocalTime(row.createdAt, { hour: '2-digit', minute: '2-digit' })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <Panel title="Recent model changes">
+            {!brokerLive?.recentModelChanges?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No model lifecycle events</p>
+            ) : (
+              <div className="space-y-3">
+                {brokerLive.recentModelChanges.map((row, i) => (
+                  <div key={`${row.providerSlug}-${row.modelId}-${i}`} className="border-b pb-3 last:border-0 last:pb-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant={row.changeType.includes('disabled') || row.changeType.includes('removed') ? 'destructive' : 'outline'}>
+                        {compactLabel(row.changeType)}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground tabular-nums">
+                        {formatSqliteUtcToLocalTime(row.detectedAt, { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-mono">{row.providerSlug}/{row.modelId}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+
         {/* Summary stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <Stat label={t('analytics.requests')} value={summary?.totalRequests ?? 0} hint={requestsHint} />

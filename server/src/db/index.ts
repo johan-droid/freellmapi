@@ -5,8 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { migrateDbSchema } from './migrations.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.resolve(__dirname, '../../data/freeapi.db');
+const DB_PATH = resolveDefaultDbPath();
 
 let db: Database.Database;
 
@@ -34,6 +33,11 @@ export function initDb(dbPath?: string): Database.Database {
 
   migrateDbSchema(db);
 
+  if (hasRemoteSecretsStore()) {
+    scheduleHydrateSecretsToRemote(db);
+    console.log('[db] Mirrored secret state to remote Postgres/Neon.');
+  }
+
   console.log(`Database initialized at ${resolvedPath}`);
   return db;
 }
@@ -48,6 +52,7 @@ export function regenerateUnifiedKey(): string {
   const db = getDb();
   const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
   db.prepare("UPDATE settings SET value = ? WHERE key = 'unified_api_key'").run(key);
+  scheduleHydrateSecretsToRemote(db);
   return key;
 }
 
@@ -64,4 +69,5 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value);
+  scheduleHydrateSecretsToRemote(db);
 }

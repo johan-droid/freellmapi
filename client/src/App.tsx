@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Languages, Menu, MoreHorizontal, Moon, Sun } from 'lucide-react'
@@ -221,6 +221,14 @@ function Navbar() {
         </div>
       </div>
     </header>
+  )
+}
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+      Loading page…
+    </div>
   )
 }
 

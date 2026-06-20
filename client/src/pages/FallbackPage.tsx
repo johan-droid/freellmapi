@@ -203,10 +203,17 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) return '0%'
+  if (value === 0 || value === 100) return `${value.toFixed(0)}%`
+  if (value > 99 || value < 1) return `${value.toFixed(2)}%`
+  return `${value.toFixed(1)}%`
+}
+
 interface TokenUsageData {
   totalBudget: number
   totalUsed: number
-  models: { displayName: string; platform: string; budget: number }[]
+  models: { displayName: string; platform: string; budget: number; sourceCount?: number; quotaPoolKey?: string }[]
 }
 
 const platformColors: Record<string, string> = {
@@ -249,7 +256,7 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
   const { t } = useI18n()
   const { totalBudget, totalUsed, models } = data
   const remaining = Math.max(0, totalBudget - totalUsed)
-  const remainingPct = totalBudget > 0 ? Math.round((remaining / totalBudget) * 100) : 0
+  const remainingPct = totalBudget > 0 ? (remaining / totalBudget) * 100 : 0
 
   // Collapse the per-model legend to a few rows; the chevron reveals the rest.
   // The toggle only appears when the legend actually overflows the collapsed
@@ -284,6 +291,9 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
           {remainingPct}% {t('models.of')} {formatTokens(totalBudget)}
         </span>
       </div>
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        Estimated from catalog quota labels, not live provider balance. Shared free pools are counted once, and only providers with an enabled key are included.
+      </p>
 
       <div className="flex h-2.5 rounded-full overflow-hidden bg-muted">
         {modelsWithWidth.map((m, i) => (
@@ -318,6 +328,9 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
                 style={{ backgroundColor: platformColors[m.platform] ?? '#94a3b8' }}
               />
               <span className="truncate">{m.displayName}</span>
+              {m.sourceCount && m.sourceCount > 1 && (
+                <span className="text-muted-foreground/70">({m.sourceCount} models)</span>
+              )}
               <span className="flex-1" />
               <span className="font-mono text-muted-foreground">{formatTokens(m.remainingTokens)}</span>
             </div>
@@ -464,6 +477,7 @@ export default function FallbackPage() {
   const { data: tokenUsage } = useQuery<TokenUsageData>({
     queryKey: ['fallback', 'token-usage'],
     queryFn: () => apiFetch('/api/fallback/token-usage'),
+    refetchInterval: 15_000,
   })
 
   const { data: routing } = useQuery<RoutingData>({
