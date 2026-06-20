@@ -46,6 +46,9 @@ interface FallbackEntry {
   monthlyTokenBudget: string
   supportsVision: boolean
   supportsTools: boolean
+  codingBias: boolean
+  researchBias: boolean
+  chatBias: boolean
   keyCount: number
 }
 
@@ -351,6 +354,11 @@ function RowContent({
 }) {
   const { t } = useI18n()
   const guard = (row.headroom ?? 1) * (row.rateLimit ?? 1)
+  const intentTags = [
+    row.codingBias && { label: t('models.coding'), title: t('models.codingTitle'), className: 'bg-sky-600/15 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300' },
+    row.researchBias && { label: t('models.research'), title: t('models.researchTitle'), className: 'bg-violet-600/15 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300' },
+    row.chatBias && { label: t('models.chat'), title: t('models.chatTitle'), className: 'bg-emerald-600/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300' },
+  ].filter(Boolean) as { label: string; title: string; className: string }[]
   return (
     <>
       <td className="py-2 pl-3 pr-1 w-6 align-middle">
@@ -361,6 +369,15 @@ function RowContent({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm">{row.displayName}</span>
           <span className="text-xs text-muted-foreground">{row.platform}</span>
+          {intentTags.map(tag => (
+            <span
+              key={tag.label}
+              title={tag.title}
+              className={`text-[10px] rounded-full px-1.5 py-0.5 ${tag.className}`}
+            >
+              {tag.label}
+            </span>
+          ))}
           {row.supportsVision && (
             <span
               title={t('models.visionTitle')}

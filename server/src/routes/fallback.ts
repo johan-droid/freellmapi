@@ -62,7 +62,8 @@ fallbackRouter.get('/', (_req: Request, res: Response) => {
            m.platform, m.model_id, m.display_name, m.intelligence_rank,
            m.speed_rank, m.size_label, m.rpm_limit, m.rpd_limit,
            m.tpm_limit, m.tpd_limit,
-           m.monthly_token_budget, m.supports_vision, m.supports_tools
+           m.monthly_token_budget, m.supports_vision, m.supports_tools,
+           m.coding_bias, m.research_bias, m.chat_bias
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
     WHERE m.enabled = 1
@@ -103,6 +104,9 @@ fallbackRouter.get('/', (_req: Request, res: Response) => {
       monthlyTokenBudget: r.monthly_token_budget,
       supportsVision: r.supports_vision === 1,
       supportsTools: r.supports_tools === 1,
+      codingBias: r.coding_bias === 1,
+      researchBias: r.research_bias === 1,
+      chatBias: r.chat_bias === 1,
       keyCount: keyCountMap.get(r.platform) ?? 0,
     };
   }));

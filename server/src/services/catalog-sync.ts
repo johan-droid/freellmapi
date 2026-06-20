@@ -3,6 +3,7 @@ import type DatabaseType from 'better-sqlite3';
 import { getDb, getSetting, setSetting } from '../db/index.js';
 import { hasProvider } from '../providers/index.js';
 import type { Platform } from '@freellmapi/shared/types.js';
+import { refreshModelIntentFlags } from './model-intent.js';
 
 /**
  * catalog-sync — keeps the local model catalog in step with the published one.
@@ -247,6 +248,7 @@ export function applyCatalog(db: DatabaseType.Database, catalog: Catalog): NonNu
   });
 
   apply();
+  refreshModelIntentFlags(db);
   return counts;
 }
 

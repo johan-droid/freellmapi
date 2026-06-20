@@ -21,6 +21,10 @@ interface MockModel {
   speedRank: number
   monthlyTokenBudget: string
   supportsVision: boolean
+  supportsTools: boolean
+  codingBias: boolean
+  researchBias: boolean
+  chatBias: boolean
   rpmLimit: number | null
   rpdLimit: number | null
   enabled: boolean
@@ -43,13 +47,13 @@ function activeWeights() {
 }
 
 const models: MockModel[] = [
-  { modelDbId: 1, platform: 'google', modelId: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', sizeLabel: 'Frontier', intelligenceRank: 1, speedRank: 8, monthlyTokenBudget: '~12M', supportsVision: true, rpmLimit: 5, rpdLimit: 100, enabled: true, priority: 1, reliability: 0.94, speed: 0.55, intelligence: 1.0, headroom: 1, rateLimit: 1, totalRequests: 412 },
-  { modelDbId: 2, platform: 'groq', modelId: 'openai/gpt-oss-120b', displayName: 'GPT-OSS 120B', sizeLabel: 'Frontier', intelligenceRank: 6, speedRank: 2, monthlyTokenBudget: '~6M', supportsVision: false, rpmLimit: 30, rpdLimit: 1000, enabled: true, priority: 2, reliability: 0.9, speed: 0.98, intelligence: 0.72, headroom: 1, rateLimit: 0.7, totalRequests: 833 },
-  { modelDbId: 3, platform: 'cerebras', modelId: 'llama-3.3-70b', displayName: 'Llama 3.3 70B', sizeLabel: 'Large', intelligenceRank: 4, speedRank: 1, monthlyTokenBudget: '~50M', supportsVision: false, rpmLimit: 30, rpdLimit: 14400, enabled: true, priority: 3, reliability: 0.88, speed: 1.0, intelligence: 0.5, headroom: 1, rateLimit: 1, totalRequests: 256 },
-  { modelDbId: 4, platform: 'google', modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', sizeLabel: 'Large', intelligenceRank: 4, speedRank: 5, monthlyTokenBudget: '~3M', supportsVision: true, rpmLimit: 10, rpdLimit: 20, enabled: true, priority: 4, reliability: 0.97, speed: 0.78, intelligence: 0.52, headroom: 0.45, rateLimit: 1, totalRequests: 90 },
-  { modelDbId: 5, platform: 'nvidia', modelId: 'llama-4-scout', displayName: 'Llama 4 Scout', sizeLabel: 'Medium', intelligenceRank: 7, speedRank: 4, monthlyTokenBudget: '~30M', supportsVision: true, rpmLimit: 40, rpdLimit: null, enabled: true, priority: 5, reliability: 0.7, speed: 0.83, intelligence: 0.33, headroom: 1, rateLimit: 1, totalRequests: 47 },
-  { modelDbId: 6, platform: 'openrouter', modelId: 'deepseek/deepseek-v3.1:free', displayName: 'DeepSeek V3.1', sizeLabel: 'Frontier', intelligenceRank: 2, speedRank: 10, monthlyTokenBudget: '~6M', supportsVision: false, rpmLimit: 20, rpdLimit: 200, enabled: false, priority: 6, reliability: 0.5, speed: 0.4, intelligence: 0.67, headroom: 1, rateLimit: 1, totalRequests: 0 },
-  { modelDbId: 7, platform: 'mistral', modelId: 'mistral-large', displayName: 'Mistral Large', sizeLabel: 'Large', intelligenceRank: 5, speedRank: 6, monthlyTokenBudget: '~15M', supportsVision: false, rpmLimit: 60, rpdLimit: 500, enabled: true, priority: 7, reliability: 0.82, speed: 0.6, intelligence: 0.45, headroom: 1, rateLimit: 1, totalRequests: 178 },
+  { modelDbId: 1, platform: 'google', modelId: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', sizeLabel: 'Frontier', intelligenceRank: 1, speedRank: 8, monthlyTokenBudget: '~12M', supportsVision: true, supportsTools: true, codingBias: false, researchBias: true, chatBias: false, rpmLimit: 5, rpdLimit: 100, enabled: true, priority: 1, reliability: 0.94, speed: 0.55, intelligence: 1.0, headroom: 1, rateLimit: 1, totalRequests: 412 },
+  { modelDbId: 2, platform: 'groq', modelId: 'openai/gpt-oss-120b', displayName: 'GPT-OSS 120B', sizeLabel: 'Frontier', intelligenceRank: 6, speedRank: 2, monthlyTokenBudget: '~6M', supportsVision: false, supportsTools: true, codingBias: true, researchBias: true, chatBias: false, rpmLimit: 30, rpdLimit: 1000, enabled: true, priority: 2, reliability: 0.9, speed: 0.98, intelligence: 0.72, headroom: 1, rateLimit: 0.7, totalRequests: 833 },
+  { modelDbId: 3, platform: 'cerebras', modelId: 'llama-3.3-70b', displayName: 'Llama 3.3 70B', sizeLabel: 'Large', intelligenceRank: 4, speedRank: 1, monthlyTokenBudget: '~50M', supportsVision: false, supportsTools: true, codingBias: true, researchBias: true, chatBias: false, rpmLimit: 30, rpdLimit: 14400, enabled: true, priority: 3, reliability: 0.88, speed: 1.0, intelligence: 0.5, headroom: 1, rateLimit: 1, totalRequests: 256 },
+  { modelDbId: 4, platform: 'google', modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', sizeLabel: 'Large', intelligenceRank: 4, speedRank: 5, monthlyTokenBudget: '~3M', supportsVision: true, supportsTools: true, codingBias: false, researchBias: false, chatBias: true, rpmLimit: 10, rpdLimit: 20, enabled: true, priority: 4, reliability: 0.97, speed: 0.78, intelligence: 0.52, headroom: 0.45, rateLimit: 1, totalRequests: 90 },
+  { modelDbId: 5, platform: 'nvidia', modelId: 'llama-4-scout', displayName: 'Llama 4 Scout', sizeLabel: 'Medium', intelligenceRank: 7, speedRank: 4, monthlyTokenBudget: '~30M', supportsVision: true, supportsTools: true, codingBias: false, researchBias: false, chatBias: true, rpmLimit: 40, rpdLimit: null, enabled: true, priority: 5, reliability: 0.7, speed: 0.83, intelligence: 0.33, headroom: 1, rateLimit: 1, totalRequests: 47 },
+  { modelDbId: 6, platform: 'openrouter', modelId: 'deepseek/deepseek-v3.1:free', displayName: 'DeepSeek V3.1', sizeLabel: 'Frontier', intelligenceRank: 2, speedRank: 10, monthlyTokenBudget: '~6M', supportsVision: false, supportsTools: true, codingBias: true, researchBias: true, chatBias: false, rpmLimit: 20, rpdLimit: 200, enabled: false, priority: 6, reliability: 0.5, speed: 0.4, intelligence: 0.67, headroom: 1, rateLimit: 1, totalRequests: 0 },
+  { modelDbId: 7, platform: 'mistral', modelId: 'mistral-large', displayName: 'Mistral Large', sizeLabel: 'Large', intelligenceRank: 5, speedRank: 6, monthlyTokenBudget: '~15M', supportsVision: false, supportsTools: true, codingBias: true, researchBias: true, chatBias: false, rpmLimit: 60, rpdLimit: 500, enabled: true, priority: 7, reliability: 0.82, speed: 0.6, intelligence: 0.45, headroom: 1, rateLimit: 1, totalRequests: 178 },
 ]
 
 function budgetTokens(label: string): number {
@@ -99,7 +103,9 @@ export function mockApiPlugin(): Plugin {
             enabled: m.enabled, platform: m.platform, modelId: m.modelId, displayName: m.displayName,
             intelligenceRank: m.intelligenceRank, speedRank: m.speedRank, sizeLabel: m.sizeLabel,
             rpmLimit: m.rpmLimit, rpdLimit: m.rpdLimit, monthlyTokenBudget: m.monthlyTokenBudget,
-            supportsVision: m.supportsVision, keyCount: 3,
+            supportsVision: m.supportsVision, supportsTools: m.supportsTools,
+            codingBias: m.codingBias, researchBias: m.researchBias, chatBias: m.chatBias,
+            keyCount: 3,
           }))
           return send(rows)
         }

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { initEncryptionKey } from '../lib/crypto.js';
 import { applyModelPricing } from './model-pricing.js';
+import { refreshModelIntentFlags } from '../services/model-intent.js';
 
 export function migrateDbSchema(db: Database.Database) {
   createTables(db);
@@ -32,6 +33,8 @@ export function migrateDbSchema(db: Database.Database) {
   migrateModelsV23FreeTierAudit(db);
   migrateModelsV24ZenRefresh(db);
   migrateModelsV25ZenDeadPromos(db);
+  migrateModelsV26IntentBias(db);
+  refreshModelIntentFlags(db);
   // V25 is the LAST model-data migration. Since the Premium live catalog
   // shipped (June 2026), model/limit DATA is maintained in the published
   // catalog (served signed by the catalog service) and reaches installs via
@@ -67,6 +70,9 @@ function createTables(db: Database.Database) {
       context_window INTEGER,
       enabled INTEGER NOT NULL DEFAULT 1,
       supports_vision INTEGER NOT NULL DEFAULT 0,
+      coding_bias INTEGER NOT NULL DEFAULT 0,
+      research_bias INTEGER NOT NULL DEFAULT 0,
+      chat_bias INTEGER NOT NULL DEFAULT 0,
       UNIQUE(platform, model_id)
     );
 
@@ -1783,6 +1789,19 @@ function migrateModelsV22Tools(db: Database.Database) {
     `).run();
   });
   apply();
+}
+
+function migrateModelsV26IntentBias(db: Database.Database) {
+  const columns = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
+  if (!columns.some(col => col.name === 'coding_bias')) {
+    db.prepare('ALTER TABLE models ADD COLUMN coding_bias INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (!columns.some(col => col.name === 'research_bias')) {
+    db.prepare('ALTER TABLE models ADD COLUMN research_bias INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (!columns.some(col => col.name === 'chat_bias')) {
+    db.prepare('ALTER TABLE models ADD COLUMN chat_bias INTEGER NOT NULL DEFAULT 0').run();
+  }
 }
 
 /**
