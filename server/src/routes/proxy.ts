@@ -17,6 +17,7 @@ import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModel
 import { logRequest } from '../lib/request-log.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
+import { detectRequestIntent } from '../services/request-intent.js';
 
 export const proxyRouter = Router();
 
@@ -596,6 +597,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // loop sees nothing, which is strictly worse than an error. Same up-front
   // gate pattern as vision above.
   const wantsTools = (tools?.length ?? 0) > 0;
+  const requestIntent = detectRequestIntent(messages, tools);
   if (wantsTools && !hasEnabledToolsModel()) {
     res.status(422).json({
       error: {
@@ -772,7 +774,16 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       // model is on record). Turns where injection can't happen — every turn 1, and
       // sessions that never switched — pay no headroom tax.
       const routingEstimate = handoffPossible ? estimatedTotal + HANDOFF_MAX_TOKENS : estimatedTotal;
-      route = routeRequest(routingEstimate, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, hasImage, wantsTools, skipModels.size > 0 ? skipModels : undefined, resolvedChain?.chain);
+      route = routeRequest(
+        routingEstimate,
+        skipKeys.size > 0 ? skipKeys : undefined,
+        preferredModel,
+        hasImage,
+        wantsTools,
+        skipModels.size > 0 ? skipModels : undefined,
+        resolvedChain?.chain,
+        requestIntent,
+      );
     } catch (err: any) {
       // No more models available
       if (lastError) {
@@ -804,7 +815,6 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       outboundMessages = handoff.messages;
       injectedHandoffTokens = handoff.injectedTokens;
     }
-
     try {
       if (stream) {
         // — Stream turn-integrity (#231 audit) —

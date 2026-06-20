@@ -73,6 +73,46 @@ describe('Router', () => {
     expect(result.platform).toBe('google');
   });
 
+  it('biases coding requests toward coding-capable models before generic ones', () => {
+    const db = getDb();
+
+    const googleKey = encrypt('test-google-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1);
+
+    const openRouterKey = encrypt('test-openrouter-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('openrouter', 'test', openRouterKey.encrypted, openRouterKey.iv, openRouterKey.authTag, 'healthy', 1);
+
+    const gemma = db.prepare(`
+      SELECT id FROM models
+       WHERE platform = 'google' AND LOWER(model_id) LIKE '%gemma%'
+       ORDER BY id ASC LIMIT 1
+    `).get() as { id: number } | undefined;
+    const qwenCoder = db.prepare(`
+      SELECT id FROM models
+       WHERE platform = 'openrouter' AND model_id = 'qwen/qwen3-coder:free'
+       LIMIT 1
+    `).get() as { id: number } | undefined;
+
+    expect(gemma).toBeDefined();
+    expect(qwenCoder).toBeDefined();
+
+    db.prepare('UPDATE models SET enabled = 1 WHERE id IN (?, ?)').run(gemma!.id, qwenCoder!.id);
+    db.prepare('UPDATE fallback_config SET priority = 0, enabled = 1 WHERE model_db_id = ?').run(gemma!.id);
+    db.prepare('UPDATE fallback_config SET priority = 1, enabled = 1 WHERE model_db_id = ?').run(qwenCoder!.id);
+
+    const plain = routeRequest(1000);
+    expect(plain.modelDbId).toBe(gemma!.id);
+
+    const coding = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, { coding: true });
+    expect(coding.modelDbId).toBe(qwenCoder!.id);
+  });
+
   it('should skip disabled keys', () => {
     const db = getDb();
 

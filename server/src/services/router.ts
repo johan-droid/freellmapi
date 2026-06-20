@@ -320,6 +320,29 @@ interface ScoredEntry {
   score: number;
 }
 
+function isCodingModel(entry: ChainRow): boolean {
+  const haystack = `${entry.platform} ${entry.model_id} ${entry.display_name}`.toLowerCase();
+  return entry.supports_tools === 1 && (
+    haystack.includes('coder') ||
+    haystack.includes('codestral') ||
+    haystack.includes('devstral') ||
+    haystack.includes('gpt-oss') ||
+    haystack.includes('deepseek-v3') ||
+    haystack.includes('deepseek-v4') ||
+    haystack.includes('qwen3') ||
+    haystack.includes('qwen-3') ||
+    haystack.includes('glm-') ||
+    haystack.includes('command-r') ||
+    haystack.includes('command-a') ||
+    haystack.includes('nemotron') ||
+    haystack.includes('minimax-m3') ||
+    haystack.includes('opencode') ||
+    haystack.includes('mistral-large') ||
+    haystack.includes('mistral-medium') ||
+    haystack.includes('mistral-small')
+  );
+}
+
 function scoreChainEntry(
   entry: ChainRow,
   weights: RoutingWeights,
@@ -743,7 +766,7 @@ export function resolveFusionCandidate(modelId: string): FusionCandidate | null 
   };
 }
 
-export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[]): RouteResult {
+export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requestIntent?: { coding?: boolean }): RouteResult {
   const db = getDb();
 
   const strategy = getRoutingStrategy();
@@ -751,7 +774,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
 
   const chain = prefetchedChain ?? getActiveChain(db).filter(e => e.enabled);
 
-  const sortedChain = orderChain(chain, strategy);
+  let sortedChain = orderChain(chain, strategy);
 
   // Sticky session / Explicit pinning: move preferred model to front of chain
   if (preferredModelDbId) {
@@ -778,6 +801,17 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
       if (pinnedRow) {
         sortedChain.unshift(pinnedRow);
       }
+    }
+  }
+
+  if (requestIntent?.coding) {
+    const codingModels = sortedChain.filter(isCodingModel);
+    if (codingModels.length > 0) {
+      const codingIds = new Set(codingModels.map(e => e.model_db_id));
+      sortedChain = [
+        ...codingModels,
+        ...sortedChain.filter(e => !codingIds.has(e.model_db_id)),
+      ];
     }
   }
 

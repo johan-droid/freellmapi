@@ -28,6 +28,7 @@ import {
 } from './proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
+import { detectRequestIntent } from '../services/request-intent.js';
 
 export const responsesRouter = Router();
 
@@ -315,6 +316,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   const stream = reqData.stream ?? false;
   const messages = toChatMessages(reqData);
   const tools = toChatTools(reqData.tools);
+  const requestIntent = detectRequestIntent(messages, reqData.tools as any[]);
   // name → parameter schema, for repairing double-encoded tool arguments on
   // the way back out (see lib/tool-args.ts).
   const toolSchemas = toolSchemaMap(tools);
@@ -342,7 +344,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // endpoint) must stay on models that emit structured tool_calls — a model
   // that serializes the call into text strands the agent harness with a
   // "successful" run it can't act on. Mirrors the /chat/completions gate.
-  const wantsTools = (tools?.length ?? 0) > 0;
+  const wantsTools = (reqData.tools?.length ?? 0) > 0 || (tools?.length ?? 0) > 0;
   if (wantsTools && !hasEnabledToolsModel()) {
     res.status(422).json({
       error: {
@@ -370,7 +372,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let route: RouteResult;
     try {
-      route = routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, false, wantsTools, skipModels.size > 0 ? skipModels : undefined);
+      route = routeRequest(
+        estimatedTotal,
+        skipKeys.size > 0 ? skipKeys : undefined,
+        preferredModel,
+        false,
+        wantsTools,
+        skipModels.size > 0 ? skipModels : undefined,
+        undefined,
+        requestIntent,
+      );
     } catch (err: any) {
       const status = lastError ? 429 : (err.status ?? 503);
       const message = lastError
