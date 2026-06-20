@@ -8,11 +8,13 @@ import { modelsRouter } from './routes/models.js';
 import { proxyRouter } from './routes/proxy.js';
 import { responsesRouter } from './routes/responses.js';
 import { fallbackRouter } from './routes/fallback.js';
+import { profilesRouter } from './routes/profiles.js';
 import { embeddingsRouter } from './routes/embeddings.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { analyticsExtraRouter } from './routes/analytics-extra.js';
 import { healthRouter } from './routes/health.js';
 import { settingsRouter } from './routes/settings.js';
+import { premiumRouter } from './routes/premium.js';
 import { authRouter } from './routes/auth.js';
 import { providersRouter, providerAccountsRouter, modelDiscoveryRouter } from './routes/providers.js';
 import { storageRouter } from './routes/storage.js';
@@ -75,6 +77,10 @@ export function createApp() {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-FreeLLMAPI-Client', 'X-Client-Name'],
     maxAge: 600,
   }));
+  // 10mb: code agents (OpenCode, AionUI, Qwen Code) ship very large system
+  // prompts + tool schemas + repo context; 1mb cut their sessions off
+  // mid-conversation with an opaque 413. (#200)
+  app.use(express.json({ limit: '10mb' }));
 
   app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? '1mb' }));
 
@@ -90,16 +96,14 @@ export function createApp() {
 
   app.use('/api/keys', requireAuth, keysRouter);
   app.use('/api/models', requireAuth, modelsRouter);
+  app.use('/api/profiles', requireAuth, profilesRouter);
   app.use('/api/fallback', requireAuth, fallbackRouter);
   app.use('/api/embeddings', requireAuth, embeddingsRouter);
   app.use('/api/analytics', requireAuth, analyticsRouter);
   app.use('/api/analytics', requireAuth, analyticsExtraRouter);
   app.use('/api/health', requireAuth, healthRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
-  app.use('/api/providers', requireAuth, providersRouter);
-  app.use('/api/provider-accounts', requireAuth, providerAccountsRouter);
-  app.use('/api/model-discovery', requireAuth, modelDiscoveryRouter);
-  app.use('/api/storage', requireAuth, storageRouter);
+  app.use('/api/premium', requireAuth, premiumRouter);
 
   app.use('/v1', createProxyRateLimiter());
   app.use('/v1', proxyRouter);

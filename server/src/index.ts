@@ -2,22 +2,24 @@ import { installLogRedaction } from './lib/redact.js';
 installLogRedaction();
 
 import { createApp } from './app.js';
-import { initDb } from './db/index.js';
-import { hardenDatabase } from './db/hardening.js';
-import { hasRemoteSecretsStore } from './services/remote-secrets.js';
+import { initDb, getSetting } from './db/index.js';
 import { startHealthChecker } from './services/health.js';
-import { getDatabasePath, restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
-import { startModelDiscoveryLoop } from './jobs/modelDiscoveryJob.js';
+import { applyProxyUrl, applyProxyEnabled, applyProxyBypass } from './lib/proxy.js';
+import { startCatalogSync } from './services/catalog-sync.js';
 
 const PORT = process.env.PORT ?? 3001;
 // IPv4-only ('0.0.0.0') by default so Render can detect the bound port.
 const HOST = process.env.HOST ?? '0.0.0.0';
 
 async function main() {
-  await restoreDatabaseBeforeBoot();
-  const db = initDb(getDatabasePath());
-  hardenDatabase(db);
-  const stopSnapshots = startDatabaseSnapshotLoop();
+  initDb();
+
+  // Load the persisted proxy settings from the DB (env var wins if set).
+  // Must happen after initDb so the settings table is ready.
+  applyProxyUrl(getSetting('proxy_url') ?? '');
+  applyProxyEnabled(getSetting('proxy_enabled') !== '0'); // default: enabled
+  applyProxyBypass(getSetting('proxy_bypass') ?? '');
+
   const app = createApp();
 
   const onReady = (host: string) => () => {
@@ -25,7 +27,7 @@ async function main() {
     console.log(`Server running on http://${display}:${PORT}`);
     console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);
     startHealthChecker();
-    startModelDiscoveryLoop();
+    startCatalogSync();
   };
 
   const server = app.listen(Number(PORT), HOST, onReady(HOST));

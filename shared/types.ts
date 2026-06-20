@@ -5,13 +5,15 @@
 // Moonshot and MiniMax direct integrations were dropped in migrateModelsV4
 // (see server/src/db/index.ts). HuggingFace was dropped in V4 and re-added
 // in V13 via the router.huggingface.co Inference Providers meta-router.
+// SambaNova was dropped in V23 (free tier permanently retired — 402
+// "payment method required" once the one-time $5 trial credit lapses).
 export type Platform =
   | 'google'
   | 'groq'
   | 'cerebras'
-  | 'sambanova'
   | 'nvidia'
   | 'mistral'
+  | 'sambanova'
   | 'openrouter'
   | 'github'
   | 'cohere'
@@ -25,6 +27,17 @@ export type Platform =
   // OpenCode Zen — OpenAI-compatible gateway. Free promotional models require a
   // free (no-card) account key from opencode.ai/auth; see migrateModelsV18.
   | 'opencode'
+  // OVHcloud AI Endpoints — OpenAI-compatible, keyless anonymous tier
+  // (2 req/min per IP per model); see migrateModelsV26.
+  | 'ovh'
+  // Agnes AI (Sapiens AI) — OpenAI-compatible (LiteLLM + vLLM backend). Serves
+  // its own proprietary Agnes models; the free key comes from
+  // platform.agnes-ai.com (no card).
+  | 'agnes'
+  // Reka — OpenAI-compatible. Native multimodal models (reka-edge takes
+  // image/video); free via a recurring monthly credit grant, key from
+  // platform.reka.ai (no card).
+  | 'reka'
   // User-configured OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM,
   // Ollama, any base_url). The endpoint URL lives on the api_keys row; see #117.
   | 'custom';
@@ -46,6 +59,34 @@ export interface Model {
   enabled: boolean;
   supportsVision: boolean;
   supportsTools: boolean;
+}
+
+// ---- Quirks ----
+// Structured, reusable notes about catalog models. One quirk is applied to many
+// models via selector parameters (see quirk_targets / services/quirks.ts).
+export type QuirkSeverity = 'info' | 'warning' | 'blocker';
+
+export interface Quirk {
+  slug: string;
+  title: string;
+  body: string;
+  severity: QuirkSeverity;
+}
+
+export interface QuirkTarget {
+  platform: Platform | null;
+  modelGlob: string | null;
+}
+
+export interface ModelListRow {
+  platform: string;
+  model_id: string;
+  display_name: string;
+  context_window: number | null;
+  // 1 when the catalog row is enabled. 1 when an enabled key can serve it
+  // (enabled AND a matching enabled api_key exists). SQLite returns 0/1.
+  enabled: number;
+  available: number;
 }
 
 export type KeyStatus = 'healthy' | 'rate_limited' | 'invalid' | 'error' | 'unknown';
@@ -117,10 +158,12 @@ export type ChatToolChoice =
   };
 
 // OpenAI's multimodal envelope: clients like opencode / continue.dev send
-// content as an array of typed blocks even for text-only messages. We accept
-// it on the wire and flatten to string for providers that don't support it
-// (Cohere, Cloudflare). See server/src/lib/content.ts.
-export type ChatContentBlock = { type: string; text?: string; [key: string]: unknown };
+// content as an array of typed blocks even for text-only messages, and
+// Gemini-lineage agents (Qwen Code, AionUI) send part-style `{ text }` blocks
+// with no `type` — plus bare strings inside arrays. We accept all of it on
+// the wire and flatten to string for providers that don't support arrays
+// (Cohere, Cloudflare). See server/src/lib/content.ts. (#200)
+export type ChatContentBlock = string | { type?: string; text?: string; [key: string]: unknown };
 export type ChatContent = string | null | ChatContentBlock[];
 
 export interface ChatMessage {
@@ -129,6 +172,10 @@ export interface ChatMessage {
   name?: string;
   tool_call_id?: string;
   tool_calls?: ChatToolCall[];
+  // The model's thinking trace on an assistant turn. Some thinking models
+  // (DeepSeek on OpenCode Zen) require it to be replayed verbatim on the next
+  // turn or they 400; the proxy preserves and forwards it. See issue #255.
+  reasoning_content?: string;
 }
 
 export interface ChatCompletionRequest {
@@ -233,4 +280,37 @@ export interface RateLimitStatus {
   tpm: { used: number; limit: number | null };
   available: boolean;
   nextResetAt: string | null;
+}
+
+// ---- Provider Quota Observability ----
+
+export type QuotaMetric = 'requests' | 'tokens' | 'credits' | 'neurons';
+export type QuotaResetStrategy = 'fixed_calendar' | 'rolling_window' | 'token_bucket' | 'provider_reported' | 'unknown';
+export type QuotaObservationSource = 'header' | 'quota_api' | 'error_body' | 'local_usage' | 'documentation' | 'probe';
+
+export interface ProviderQuotaState {
+  platform: Platform;
+  keyId: number;
+  quotaPoolKey: string;
+  metric: QuotaMetric;
+  limit: number | null;
+  remaining: number | null;
+  resetAt: string | null;
+  resetStrategy: QuotaResetStrategy;
+  source: QuotaObservationSource;
+  confidence: number;
+  notes: string | null;
+  observedAt: string;
+  updatedAt: string;
+}
+
+export interface ProviderQuotaObservation extends ProviderQuotaState {
+  id: string;
+  statusCode: number | null;
+  retryAfterMs: number | null;
+  providerAccountId: string | null;
+  modelId: string | null;
+  endpoint: string | null;
+  rawJson: string | null;
+  createdAt: string;
 }
