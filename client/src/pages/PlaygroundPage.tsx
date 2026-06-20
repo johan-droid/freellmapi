@@ -234,21 +234,12 @@ export default function PlaygroundPage() {
         await streamFusion(res.body, newMessages, start)
         return
       }
-
-      const data = await res.json()
-      const content = data.choices?.[0]?.message?.content ?? JSON.stringify(data, null, 2)
-      const via = data._routed_via ?? (routedVia ? {
+      const via = routedVia ? {
         platform: routedVia.split('/')[0],
         model: routedVia.split('/').slice(1).join('/'),
       } : undefined
 
-      // Fusion responses carry a structured routing summary so we can show the
-      // panel models that replied + the judge, rather than parsing the compact
-      // X-Routed-Via string.
-      const fusion = data._fusion as
-        | { panel: { platform: string; model: string }[]; judge: { platform: string; model: string } | null }
-        | undefined
-
+      const assistantIndex = newMessages.length
       setMessages([...newMessages, {
         role: 'assistant',
         content: '',
@@ -257,8 +248,6 @@ export default function PlaygroundPage() {
           model: via?.model,
           latency,
           fallbackAttempts: fallbackAttempts ? parseInt(fallbackAttempts) : undefined,
-          fusionPanel: fusion?.panel,
-          fusionJudge: fusion?.judge,
         },
       }])
 

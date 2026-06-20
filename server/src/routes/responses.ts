@@ -28,6 +28,7 @@ import {
   isPaymentRequiredError,
   isModelNotFoundError,
   isModelAccessForbiddenError,
+  isProviderAuthFailoverError,
   timingSafeStringEqual,
   extractApiToken,
   getStickyModel,
@@ -346,7 +347,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // Optional client-managed session affinity (mirrors /chat/completions).
   const rawSessionId = req.headers['x-session-id'];
   const sessionIdHeader = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
-  const preferredModel = getStickyModel(messages, sessionIdHeader);
+
+  const brokerContext = buildBrokerContext(req, {
+    endpoint: 'responses',
+    token,
+    messages,
+    tools,
+    requestedModel: reqData.model,
+    stream,
+    maxTokens: reqData.max_output_tokens,
+  });
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
   // endpoint) must stay on models that emit structured tool_calls — a model
@@ -368,7 +378,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? reqData.model;
   let preferredModel: number | undefined;
   if (!effectiveRequestedModel || effectiveRequestedModel === 'auto') {
-    preferredModel = getStickyModelFromSession(brokerContext, false, wantsTools) ?? getStickyModel(messages);
+    preferredModel = getStickyModelFromSession(brokerContext, false, wantsTools) ?? getStickyModel(messages, sessionIdHeader);
   } else {
     const db = getDb();
     const enabled = brokerContext.aliasTarget?.providerSlug

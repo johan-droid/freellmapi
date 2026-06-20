@@ -18,6 +18,12 @@ import { logRequest } from '../lib/request-log.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { detectRequestIntent } from '../services/request-intent.js';
+import {
+  buildBrokerContext,
+  applyBrokerHeaders,
+  logRouteDecision,
+  getStickyModelFromSession,
+} from '../services/broker.js';
 
 export const proxyRouter = Router();
 
@@ -610,6 +616,19 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // gate pattern as vision above.
   const wantsTools = (tools?.length ?? 0) > 0;
   const requestIntent = detectRequestIntent(messages, tools);
+
+  const brokerContext = buildBrokerContext(req, {
+    endpoint: 'chat',
+    token,
+    messages,
+    tools,
+    requestedModel,
+    stream,
+    maxTokens: max_tokens,
+  });
+
+  const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? requestedModel;
+
   if (wantsTools && !hasEnabledToolsModel()) {
     applyBrokerHeaders(res, brokerContext);
     res.status(422).json({
@@ -744,9 +763,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // different model would be surprising to OpenAI-compatible clients.
   // Sticky-session is the fallback when no `model` field was sent at all.
   let preferredModel: number | undefined;
-  if (isAutoModel(requestedModel)) {
-    preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
-  } else if (requestedModel) {
+  if (isAutoModel(effectiveRequestedModel)) {
+    preferredModel = getStickyModelFromSession(brokerContext, hasImage, wantsTools) ?? getStickyModel(messages, sessionIdHeader, strategyKey);
+  } else if (effectiveRequestedModel) {
     const db = getDb();
     const enabled = brokerContext.aliasTarget?.providerSlug
       ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? AND enabled = 1')
@@ -773,7 +792,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       return;
     }
   } else {
-    preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
+    preferredModel = getStickyModelFromSession(brokerContext, hasImage, wantsTools) ?? getStickyModel(messages, sessionIdHeader, strategyKey);
   }
 
   // For analytics: the model id the client pinned, null when auto-routed

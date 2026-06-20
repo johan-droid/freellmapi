@@ -4,6 +4,7 @@ import { getDb } from '../db/index.js';
 import { checkKeyHealth, checkAllKeys } from '../services/health.js';
 import { hasProvider } from '../providers/index.js';
 import { getQuotaStateForKeys } from '../services/provider-quota.js';
+import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 
 export const healthRouter = Router();
 

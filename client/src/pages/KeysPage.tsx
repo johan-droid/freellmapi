@@ -142,6 +142,14 @@ function UnifiedKeySection() {
   const queryClient = useQueryClient()
   const [revealedKey, setRevealedKey] = useState('')
   const [copied, setCopied] = useState(false)
+  const [showKey, setShowKey] = useState(false)
+
+  async function toggleShowKey() {
+    if (!showKey && !revealedKey) {
+      reveal.mutate()
+    }
+    setShowKey(!showKey)
+  }
 
   const { data, isError } = useQuery<{ maskedKey: string; prefix: string }>({
     queryKey: ['unified-key'],
@@ -199,9 +207,9 @@ function UnifiedKeySection() {
       ) : (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <code className="min-w-0 flex-1 overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs tabular-nums">
-            {revealedKey || data?.maskedKey || '…'}
+            {showKey ? (revealedKey || '…') : (data?.maskedKey || '…')}
           </code>
-          <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)}>
+          <Button variant="outline" size="sm" onClick={toggleShowKey}>
             {showKey ? t('keys.hideKey') : t('keys.showKey')}
           </Button>
           <Button variant="outline" size="sm" onClick={copy}>
@@ -741,7 +749,7 @@ export default function KeysPage() {
                           <div className="flex min-w-0 items-center gap-3">
                             <span className={`size-1.5 shrink-0 rounded-full ${statusDot[status] ?? statusDot.unknown}`} />
                             <code className="min-w-0 truncate font-mono text-xs">{k.maskedKey}</code>
-                            <span className="shrink-0 text-xs text-muted-foreground">{statusLabel[status] ?? status}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground">{statusLabelKey[status] ? t(statusLabelKey[status]) : status}</span>
                           </div>
                           {isEditing ? (
                             <Input
@@ -761,7 +769,6 @@ export default function KeysPage() {
                               {k.label && <span className="text-xs text-muted-foreground">{k.label}</span>}
                             </>
                           )}
-                          <span className="text-xs text-muted-foreground">{statusLabelKey[status] ? t(statusLabelKey[status]) : status}</span>
                           <div className="flex-1" />
                           {lastChecked && (
                             <span className="text-[11px] text-muted-foreground tabular-nums">

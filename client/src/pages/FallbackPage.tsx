@@ -203,12 +203,6 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function formatPercent(value: number): string {
-  if (!Number.isFinite(value)) return '0%'
-  if (value === 0 || value === 100) return `${value.toFixed(0)}%`
-  if (value > 99 || value < 1) return `${value.toFixed(2)}%`
-  return `${value.toFixed(1)}%`
-}
 
 interface TokenUsageData {
   totalBudget: number
