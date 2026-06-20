@@ -11,6 +11,7 @@ import { parseBudget } from '../lib/budget.js';
 import type { BaseProvider } from '../providers/base.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { Database } from 'better-sqlite3';
+import type { RequestIntent } from './request-intent.js';
 
 class RouteError extends Error {
   status: number;
@@ -332,8 +333,6 @@ function isCodingModel(entry: ChainRow): boolean {
     haystack.includes('qwen3') ||
     haystack.includes('qwen-3') ||
     haystack.includes('glm-') ||
-    haystack.includes('command-r') ||
-    haystack.includes('command-a') ||
     haystack.includes('nemotron') ||
     haystack.includes('minimax-m3') ||
     haystack.includes('opencode') ||
@@ -341,6 +340,95 @@ function isCodingModel(entry: ChainRow): boolean {
     haystack.includes('mistral-medium') ||
     haystack.includes('mistral-small')
   );
+}
+
+function isExplicitResearchModel(entry: ChainRow): boolean {
+  const haystack = `${entry.platform} ${entry.model_id} ${entry.display_name}`.toLowerCase();
+  return (
+    haystack.includes('reasoning') ||
+    haystack.includes('deepseek-v4') ||
+    haystack.includes('command-a') ||
+    haystack.includes('kimi-k2') ||
+    haystack.includes('nemotron-3-super') ||
+    haystack.includes('nemotron-3-ultra') ||
+    haystack.includes('glm-4.7') ||
+    haystack.includes('glm-4.6') ||
+    haystack.includes('gpt-5')
+  );
+}
+
+function isResearchModel(entry: ChainRow): boolean {
+  const haystack = `${entry.platform} ${entry.model_id} ${entry.display_name}`.toLowerCase();
+  return (
+    isExplicitResearchModel(entry) ||
+    entry.size_label === 'Frontier' ||
+    entry.size_label === 'Large' ||
+    haystack.includes('pro') ||
+    haystack.includes('ultra') ||
+    haystack.includes('gemini-3') ||
+    haystack.includes('deepseek-v3')
+  );
+}
+
+function isChatModel(entry: ChainRow): boolean {
+  const haystack = `${entry.platform} ${entry.model_id} ${entry.display_name}`.toLowerCase();
+  return (
+    haystack.includes('flash') ||
+    haystack.includes('flash-lite') ||
+    haystack.includes('mini') ||
+    haystack.includes('haiku') ||
+    haystack.includes('scout') ||
+    haystack.includes('chat') ||
+    haystack.includes('instruct') ||
+    haystack.includes('gpt-4o') ||
+    haystack.includes('gpt-oss-20b') ||
+    haystack.includes('gemini-2.5-flash') ||
+    haystack.includes('llama-3.3-70b') ||
+    haystack.includes('mistral-small') ||
+    haystack.includes('mistral-medium')
+  );
+}
+
+function applyIntentBias(sortedChain: ChainRow[], requestIntent?: RequestIntent): ChainRow[] {
+  if (!requestIntent) return sortedChain;
+
+  const seen = new Set<number>();
+  const result: ChainRow[] = [];
+  const takeMatches = (predicate: (entry: ChainRow) => boolean) => {
+    for (const entry of sortedChain) {
+      if (!seen.has(entry.model_db_id) && predicate(entry)) {
+        seen.add(entry.model_db_id);
+        result.push(entry);
+      }
+    }
+  };
+
+  if (requestIntent.kind === 'agentic' || requestIntent.kind === 'coding') {
+    takeMatches(isCodingModel);
+    takeMatches((entry) => entry.supports_tools === 1);
+  } else if (requestIntent.kind === 'research') {
+    takeMatches(isExplicitResearchModel);
+    takeMatches(isResearchModel);
+    takeMatches((entry) => (
+      (entry.size_label === 'Frontier' || entry.size_label === 'Large') &&
+      !entry.model_id.toLowerCase().includes('flash') &&
+      !entry.model_id.toLowerCase().includes('mini') &&
+      !entry.model_id.toLowerCase().includes('scout') &&
+      !entry.model_id.toLowerCase().includes('chat') &&
+      !entry.model_id.toLowerCase().includes('instruct')
+    ));
+  } else if (requestIntent.kind === 'chat') {
+    takeMatches(isChatModel);
+  }
+
+  for (const entry of sortedChain) {
+    if (!seen.has(entry.model_db_id)) {
+      seen.add(entry.model_db_id);
+      result.push(entry);
+    }
+  }
+
+  return result;
 }
 
 function scoreChainEntry(
@@ -571,9 +659,16 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   if (!hasProvider(entry.platform as Platform)) return null;
   const provider = getProvider(entry.platform as Platform)!;
 
-  const keys = db.prepare(
-    "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
-  ).all(entry.platform) as KeyRow[];
+  const keys = db.prepare(`
+    SELECT *
+    FROM api_keys
+    WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
+    ORDER BY
+      CASE WHEN status = 'healthy' THEN 0 ELSE 1 END,
+      CASE WHEN last_checked_at IS NULL THEN 1 ELSE 0 END,
+      last_checked_at DESC,
+      id ASC
+  `).all(entry.platform) as KeyRow[];
   if (keys.length === 0) return null;
 
   const limits = {
@@ -766,7 +861,7 @@ export function resolveFusionCandidate(modelId: string): FusionCandidate | null 
   };
 }
 
-export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requestIntent?: { coding?: boolean }): RouteResult {
+export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requestIntent?: RequestIntent): RouteResult {
   const db = getDb();
 
   const strategy = getRoutingStrategy();
@@ -804,15 +899,11 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
     }
   }
 
-  if (requestIntent?.coding) {
-    const codingModels = sortedChain.filter(isCodingModel);
-    if (codingModels.length > 0) {
-      const codingIds = new Set(codingModels.map(e => e.model_db_id));
-      sortedChain = [
-        ...codingModels,
-        ...sortedChain.filter(e => !codingIds.has(e.model_db_id)),
-      ];
-    }
+  if (requestIntent) {
+    const pinned = preferredModelDbId ? sortedChain[0] : null;
+    const tail = pinned ? sortedChain.slice(1) : sortedChain;
+    const biasedTail = applyIntentBias(tail, requestIntent);
+    sortedChain = pinned ? [pinned, ...biasedTail] : biasedTail;
   }
 
   for (const entry of sortedChain) {

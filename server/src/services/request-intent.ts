@@ -2,8 +2,11 @@ import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { contentToString } from '../lib/content.js';
 
 export interface RequestIntent {
+  kind: 'agentic' | 'coding' | 'research' | 'chat' | 'general';
   coding: boolean;
   agentic: boolean;
+  research: boolean;
+  chat: boolean;
 }
 
 const CODING_TEXT_PATTERNS = [
@@ -29,6 +32,43 @@ const CODING_TEXT_PATTERNS = [
   /\bshell\b/i,
   /\bworkspace\b/i,
   /\brepository\b/i,
+];
+
+const RESEARCH_TEXT_PATTERNS = [
+  /\bresearch\b/i,
+  /\banal(yze|ysis)\b/i,
+  /\bcompare\b/i,
+  /\bbenchmark\b/i,
+  /\bdeep dive\b/i,
+  /\bcitation\b/i,
+  /\bsources?\b/i,
+  /\bpaper\b/i,
+  /\bliterature\b/i,
+  /\bdataset\b/i,
+  /\bproof\b/i,
+  /\btheorem\b/i,
+  /\breasoning\b/i,
+  /\bdense\b/i,
+  /\blong context\b/i,
+  /\bcontext window\b/i,
+  /\bsummarize\b/i,
+  /\bsynthesize\b/i,
+  /\binsight\b/i,
+];
+
+const CHAT_TEXT_PATTERNS = [
+  /\bhi\b/i,
+  /\bhello\b/i,
+  /\bhey\b/i,
+  /\bhow are you\b/i,
+  /\bchitchat\b/i,
+  /\bsmall talk\b/i,
+  /\bcasual\b/i,
+  /\bconversation\b/i,
+  /\bfriendly\b/i,
+  /\bpolite reply\b/i,
+  /\bdraft a message\b/i,
+  /\brewrite this message\b/i,
 ];
 
 const AGENT_TOOL_NAMES = new Set([
@@ -63,10 +103,26 @@ export function detectRequestIntent(messages: ChatMessage[], tools?: ToolLike[])
   const hasBuiltInTool = tools?.some(tool => tool.type != null && tool.type !== 'function') ?? false;
   const hasAgentToolName = tools?.some(tool => AGENT_TOOL_NAMES.has(normalizeToolName(tool))) ?? false;
   const hasCodingText = CODING_TEXT_PATTERNS.some(pattern => pattern.test(text));
+  const hasResearchText = RESEARCH_TEXT_PATTERNS.some(pattern => pattern.test(text));
+  const hasChatText = CHAT_TEXT_PATTERNS.some(pattern => pattern.test(text));
+  const isShortChatty = !hasCodingText && !hasResearchText && text.trim().length > 0 && text.trim().length < 240;
 
   const coding = hasBuiltInTool || hasAgentToolName || hasCodingText;
+  const agentic = hasTools || coding;
+  const research = !coding && !agentic && hasResearchText;
+  const chat = !coding && !agentic && (hasChatText || isShortChatty);
+  const kind = coding
+    ? (agentic ? 'agentic' : 'coding')
+    : research
+      ? 'research'
+      : chat
+        ? 'chat'
+        : 'general';
   return {
+    kind,
     coding,
-    agentic: hasTools || coding,
+    agentic,
+    research,
+    chat,
   };
 }

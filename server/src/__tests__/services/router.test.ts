@@ -22,6 +22,8 @@ describe('Router', () => {
     db.prepare('DELETE FROM api_keys').run();
     // Disable active profile so the router falls back to fallback_config
     db.prepare("DELETE FROM settings WHERE key = 'active_profile_id'").run();
+    db.prepare('UPDATE models SET enabled = 1').run();
+    db.prepare('UPDATE fallback_config SET enabled = 1').run();
     // Reset fallback order to intelligence ranking
     const models = db.prepare('SELECT id, intelligence_rank FROM models ORDER BY intelligence_rank ASC').all() as any[];
     const update = db.prepare('UPDATE fallback_config SET priority = ? WHERE model_db_id = ?');
@@ -88,29 +90,158 @@ describe('Router', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('openrouter', 'test', openRouterKey.encrypted, openRouterKey.iv, openRouterKey.authTag, 'healthy', 1);
 
-    const gemma = db.prepare(`
+    const flash = db.prepare(`
       SELECT id FROM models
-       WHERE platform = 'google' AND LOWER(model_id) LIKE '%gemma%'
+       WHERE platform = 'google' AND model_id = 'gemini-2.5-flash'
        ORDER BY id ASC LIMIT 1
     `).get() as { id: number } | undefined;
     const qwenCoder = db.prepare(`
       SELECT id FROM models
-       WHERE platform = 'openrouter' AND model_id = 'qwen/qwen3-coder:free'
+       WHERE platform = 'openrouter'
+         AND enabled = 1
+         AND supports_tools = 1
+         AND (
+           LOWER(model_id) LIKE '%coder%'
+           OR LOWER(display_name) LIKE '%coder%'
+         )
+       ORDER BY
+         CASE WHEN LOWER(model_id) LIKE '%qwen3-coder%' THEN 0 ELSE 1 END,
+       intelligence_rank ASC,
+       id ASC
        LIMIT 1
     `).get() as { id: number } | undefined;
 
-    expect(gemma).toBeDefined();
+    expect(flash).toBeDefined();
     expect(qwenCoder).toBeDefined();
 
-    db.prepare('UPDATE models SET enabled = 1 WHERE id IN (?, ?)').run(gemma!.id, qwenCoder!.id);
-    db.prepare('UPDATE fallback_config SET priority = 0, enabled = 1 WHERE model_db_id = ?').run(gemma!.id);
+    db.prepare('UPDATE models SET enabled = 1 WHERE id IN (?, ?)').run(flash!.id, qwenCoder!.id);
+    db.prepare('UPDATE fallback_config SET priority = 0, enabled = 1 WHERE model_db_id = ?').run(flash!.id);
     db.prepare('UPDATE fallback_config SET priority = 1, enabled = 1 WHERE model_db_id = ?').run(qwenCoder!.id);
 
     const plain = routeRequest(1000);
-    expect(plain.modelDbId).toBe(gemma!.id);
+    expect(plain.modelDbId).toBe(flash!.id);
 
-    const coding = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, { coding: true });
+    const coding = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+      kind: 'coding',
+      coding: true,
+      agentic: false,
+      research: false,
+      chat: false,
+    });
     expect(coding.modelDbId).toBe(qwenCoder!.id);
+  });
+
+  it('biases research prompts toward deeper, larger-context models', () => {
+    const db = getDb();
+
+    const googleKey = encrypt('test-google-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1);
+
+    const cohereKey = encrypt('test-cohere-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('cohere', 'test', cohereKey.encrypted, cohereKey.iv, cohereKey.authTag, 'healthy', 1);
+
+    const flash = db.prepare(`
+      SELECT id FROM models
+       WHERE platform = 'google' AND model_id = 'gemini-2.5-flash'
+       LIMIT 1
+    `).get() as { id: number } | undefined;
+    const reasoning = db.prepare(`
+      SELECT id FROM models
+       WHERE platform = 'cohere'
+         AND enabled = 1
+         AND (
+           size_label = 'Frontier'
+           OR size_label = 'Large'
+         )
+         AND (
+           LOWER(model_id) LIKE '%reasoning%'
+           OR LOWER(model_id) LIKE '%deepseek%'
+           OR LOWER(model_id) LIKE '%command-a%'
+           OR LOWER(display_name) LIKE '%reasoning%'
+         )
+       ORDER BY intelligence_rank ASC, id ASC
+       LIMIT 1
+    `).get() as { id: number } | undefined;
+
+    expect(flash).toBeDefined();
+    expect(reasoning).toBeDefined();
+
+    db.prepare('UPDATE models SET enabled = 1 WHERE id IN (?, ?)').run(flash!.id, reasoning!.id);
+    db.prepare('UPDATE fallback_config SET priority = 0, enabled = 1 WHERE model_db_id = ?').run(flash!.id);
+    db.prepare('UPDATE fallback_config SET priority = 1, enabled = 1 WHERE model_db_id = ?').run(reasoning!.id);
+
+    const plain = routeRequest(1000);
+    expect(plain.modelDbId).toBe(flash!.id);
+
+    const research = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+      kind: 'research',
+      coding: false,
+      agentic: false,
+      research: true,
+      chat: false,
+    });
+    expect(research.modelDbId).toBe(reasoning!.id);
+  });
+
+  it('biases conversational prompts toward fast chat models over coding specialists', () => {
+    const db = getDb();
+
+    const googleKey = encrypt('test-google-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1);
+
+    const openRouterKey = encrypt('test-openrouter-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('openrouter', 'test', openRouterKey.encrypted, openRouterKey.iv, openRouterKey.authTag, 'healthy', 1);
+
+    const coder = db.prepare(`
+      SELECT id FROM models
+       WHERE enabled = 1
+         AND supports_tools = 1
+         AND (
+           LOWER(model_id) LIKE '%coder%'
+           OR LOWER(display_name) LIKE '%coder%'
+         )
+       ORDER BY
+         CASE WHEN LOWER(model_id) LIKE '%qwen3-coder%' THEN 0 ELSE 1 END,
+         intelligence_rank ASC,
+         id ASC
+       LIMIT 1
+    `).get() as { id: number } | undefined;
+    const flash = db.prepare(`
+      SELECT id FROM models
+       WHERE platform = 'google' AND model_id = 'gemini-2.5-flash'
+       LIMIT 1
+    `).get() as { id: number } | undefined;
+
+    expect(coder).toBeDefined();
+    expect(flash).toBeDefined();
+
+    db.prepare('UPDATE models SET enabled = 1 WHERE id IN (?, ?)').run(coder!.id, flash!.id);
+    db.prepare('UPDATE fallback_config SET priority = 0, enabled = 1 WHERE model_db_id = ?').run(coder!.id);
+    db.prepare('UPDATE fallback_config SET priority = 1, enabled = 1 WHERE model_db_id = ?').run(flash!.id);
+
+    const plain = routeRequest(1000);
+    expect(plain.modelDbId).toBe(coder!.id);
+
+    const chat = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+      kind: 'chat',
+      coding: false,
+      agentic: false,
+      research: false,
+      chat: true,
+    });
+    expect(chat.modelDbId).toBe(flash!.id);
   });
 
   it('should skip disabled keys', () => {
