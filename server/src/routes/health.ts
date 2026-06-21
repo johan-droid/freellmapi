@@ -32,6 +32,37 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     ORDER BY platform, created_at DESC
   `).all() as any[];
 
+  const routingOverview = db.prepare(`
+    SELECT
+      COUNT(*) as total_models,
+      SUM(CASE WHEN m.enabled = 1 THEN 1 ELSE 0 END) as enabled_models,
+      SUM(CASE WHEN fc.enabled = 1 THEN 1 ELSE 0 END) as chain_enabled_models,
+      SUM(CASE WHEN (pcm.status IS NULL OR pcm.status IN ('active', 'candidate')) THEN 1 ELSE 0 END) as catalog_live_models,
+      SUM(CASE WHEN fc.enabled = 1
+                AND m.enabled = 1
+                AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
+                AND EXISTS (
+                  SELECT 1
+                  FROM api_keys ak
+                  WHERE ak.platform = m.platform
+                    AND ak.enabled = 1
+                )
+          THEN 1 ELSE 0 END) as routable_models
+    FROM models m
+    LEFT JOIN fallback_config fc ON fc.model_db_id = m.id
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
+  `).get() as any;
+
+  const downtimeOverview = db.prepare(`
+    SELECT
+      COUNT(*) as probe_rows_24h,
+      SUM(CASE WHEN status IN ('fail', 'error', 'timeout', 'rate_limited') THEN 1 ELSE 0 END) as failed_probe_rows_24h,
+      COUNT(DISTINCT CASE WHEN status IN ('fail', 'error', 'timeout', 'rate_limited') THEN provider_slug || '::' || provider_model_id END) as models_with_downtime_24h
+    FROM model_probe_results
+    WHERE created_at >= datetime('now', '-24 hours')
+  `).get() as any;
+
   res.json({
     platforms: platforms.map(p => ({
       platform: p.platform,
@@ -54,6 +85,18 @@ healthRouter.get('/', (_req: Request, res: Response) => {
       lastCheckedAt: k.last_checked_at,
     })),
     quotaStates: getQuotaStateForKeys(),
+    routingOverview: {
+      totalModels: routingOverview.total_models ?? 0,
+      enabledModels: routingOverview.enabled_models ?? 0,
+      chainEnabledModels: routingOverview.chain_enabled_models ?? 0,
+      catalogLiveModels: routingOverview.catalog_live_models ?? 0,
+      routableModels: routingOverview.routable_models ?? 0,
+    },
+    downtimeOverview: {
+      probeRows24h: downtimeOverview.probe_rows_24h ?? 0,
+      failedProbeRows24h: downtimeOverview.failed_probe_rows_24h ?? 0,
+      modelsWithDowntime24h: downtimeOverview.models_with_downtime_24h ?? 0,
+    },
   });
 });
 

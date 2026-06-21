@@ -8,6 +8,18 @@ import { encrypt, decrypt, maskKey } from '../lib/crypto.js';
 
 export const keysRouter = Router();
 
+function parseOptionsJson(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'string' || !raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 // Active providers — must match providers/index.ts registrations + shared/types.ts Platform.
 // Moonshot and MiniMax direct integrations were dropped in V4. HuggingFace
 // was dropped in V4 and re-added in V13 via the router.huggingface.co route.
@@ -24,13 +36,28 @@ const addKeySchema = z.object({
   platform: z.enum(PLATFORMS),
   key: z.string().optional(),
   label: z.string().optional(),
+  accountName: z.string().optional(),
+  accountEmail: z.string().email().optional(),
+  externalId: z.string().optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 });
 
 const updateKeySchema = z.object({
   enabled: z.boolean().optional(),
   label: z.string().optional(),
-}).refine(data => data.enabled !== undefined || data.label !== undefined, {
-  message: 'At least one of enabled or label must be provided',
+  accountName: z.string().nullable().optional(),
+  accountEmail: z.string().email().nullable().optional(),
+  externalId: z.string().nullable().optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+}).refine(data =>
+  data.enabled !== undefined
+  || data.label !== undefined
+  || data.accountName !== undefined
+  || data.accountEmail !== undefined
+  || data.externalId !== undefined
+  || data.options !== undefined,
+{
+  message: 'At least one field must be provided',
 });
 
 // List all keys (masked)
@@ -50,6 +77,10 @@ keysRouter.get('/', (_req: Request, res: Response) => {
       id: row.id,
       platform: row.platform,
       label: row.label,
+      accountName: row.account_name ?? null,
+      accountEmail: row.account_email ?? null,
+      externalId: row.external_id ?? null,
+      options: parseOptionsJson(row.options_json),
       maskedKey,
       baseUrl: row.base_url ?? null,
       status: row.status,
@@ -71,6 +102,10 @@ keysRouter.post('/', (req: Request, res: Response) => {
   }
 
   const { platform, label } = parsed.data;
+  const accountName = parsed.data.accountName?.trim() || null;
+  const accountEmail = parsed.data.accountEmail?.trim() || null;
+  const externalId = parsed.data.externalId?.trim() || null;
+  const optionsJson = JSON.stringify(parsed.data.options ?? {});
   const isKeyless = resolveProvider(platform)?.keyless === true;
   const rawKey = parsed.data.key?.trim() ?? '';
 
@@ -90,12 +125,26 @@ keysRouter.post('/', (req: Request, res: Response) => {
   if (isKeyless) {
     const existing = db.prepare('SELECT id FROM api_keys WHERE platform = ? LIMIT 1').get(platform) as { id: number } | undefined;
     if (existing) {
-      db.prepare("UPDATE api_keys SET enabled = 1, status = 'unknown' WHERE id = ?").run(existing.id);
+      db.prepare(`
+        UPDATE api_keys
+           SET enabled = 1,
+               status = 'unknown',
+               label = ?,
+               account_name = ?,
+               account_email = ?,
+               external_id = ?,
+               options_json = ?
+         WHERE id = ?
+      `).run(label ?? '', accountName, accountEmail, externalId, optionsJson, existing.id);
       scheduleHydrateSecretsToRemote(db);
       res.status(200).json({
         id: existing.id,
         platform,
         label: label ?? '',
+        accountName,
+        accountEmail,
+        externalId,
+        options: parsed.data.options ?? {},
         maskedKey: maskKey(keyToStore),
         status: 'unknown',
         enabled: true,
@@ -106,15 +155,19 @@ keysRouter.post('/', (req: Request, res: Response) => {
 
   const { encrypted, iv, authTag } = encrypt(keyToStore);
   const result = db.prepare(`
-    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
-    VALUES (?, ?, ?, ?, ?, 'unknown', 1)
-  `).run(platform, label ?? '', encrypted, iv, authTag);
+    INSERT INTO api_keys (platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, options_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?)
+  `).run(platform, label ?? '', accountName, accountEmail, externalId, encrypted, iv, authTag, optionsJson);
   scheduleHydrateSecretsToRemote(db);
 
   res.status(201).json({
     id: result.lastInsertRowid,
     platform,
     label: label ?? '',
+    accountName,
+    accountEmail,
+    externalId,
+    options: parsed.data.options ?? {},
     maskedKey: maskKey(keyToStore),
     status: 'unknown',
     enabled: true,
@@ -142,6 +195,10 @@ const customProviderSchema = z.object({
   displayName: z.string().optional(),
   apiKey: z.string().optional(),
   label: z.string().optional(),
+  accountName: z.string().optional(),
+  accountEmail: z.string().email().optional(),
+  externalId: z.string().optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   d => (d.model && d.model.trim().length > 0) || (d.models && d.models.length > 0),
   { message: 'model or models is required' },
@@ -158,6 +215,10 @@ keysRouter.post('/custom', (req: Request, res: Response) => {
   // Local servers often need no key; keep a sentinel so there's always a bearer.
   const rawKey = parsed.data.apiKey?.trim() || 'no-key';
   const label = parsed.data.label ?? 'Custom';
+  const accountName = parsed.data.accountName?.trim() || null;
+  const accountEmail = parsed.data.accountEmail?.trim() || null;
+  const externalId = parsed.data.externalId?.trim() || null;
+  const optionsJson = JSON.stringify(parsed.data.options ?? {});
 
   // Flatten singular + plural inputs into one list, dedupe by model id, drop
   // blanks. The singular `displayName` only applies to a lone `model` (it can't
@@ -191,15 +252,27 @@ keysRouter.post('/custom', (req: Request, res: Response) => {
     let keyId: number;
     if (existing) {
       const { encrypted, iv, authTag } = encrypt(rawKey);
-      db.prepare("UPDATE api_keys SET label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = 'unknown', enabled = 1 WHERE id = ?")
-        .run(label, encrypted, iv, authTag, existing.id);
+      db.prepare(`
+        UPDATE api_keys
+           SET label = ?,
+               account_name = ?,
+               account_email = ?,
+               external_id = ?,
+               encrypted_key = ?,
+               iv = ?,
+               auth_tag = ?,
+               status = 'unknown',
+               enabled = 1,
+               options_json = ?
+         WHERE id = ?
+      `).run(label, accountName, accountEmail, externalId, encrypted, iv, authTag, optionsJson, existing.id);
       keyId = existing.id;
     } else {
       const { encrypted, iv, authTag } = encrypt(rawKey);
       const r = db.prepare(`
-        INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
-        VALUES ('custom', ?, ?, ?, ?, 'unknown', 1, ?)
-      `).run(label, encrypted, iv, authTag, baseUrl);
+        INSERT INTO api_keys (platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, base_url, options_json)
+        VALUES ('custom', ?, ?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?)
+      `).run(label, accountName, accountEmail, externalId, encrypted, iv, authTag, baseUrl, optionsJson);
       keyId = Number(r.lastInsertRowid);
     }
 
@@ -246,6 +319,10 @@ keysRouter.post('/custom', (req: Request, res: Response) => {
     model: first.model,
     displayName: first.displayName,
     models: registered,
+    accountName,
+    accountEmail,
+    externalId,
+    options: parsed.data.options ?? {},
     maskedKey: maskKey(rawKey),
   });
 });
@@ -323,9 +400,9 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     return;
   }
 
-  const { enabled, label } = parsed.data;
+  const { enabled, label, accountName, accountEmail, externalId, options } = parsed.data;
   const updates: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
 
   if (enabled !== undefined) {
     updates.push('enabled = ?');
@@ -334,6 +411,22 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   if (label !== undefined) {
     updates.push('label = ?');
     values.push(label);
+  }
+  if (accountName !== undefined) {
+    updates.push('account_name = ?');
+    values.push(accountName);
+  }
+  if (accountEmail !== undefined) {
+    updates.push('account_email = ?');
+    values.push(accountEmail);
+  }
+  if (externalId !== undefined) {
+    updates.push('external_id = ?');
+    values.push(externalId);
+  }
+  if (options !== undefined) {
+    updates.push('options_json = ?');
+    values.push(JSON.stringify(options));
   }
 
   values.push(id);
@@ -350,5 +443,9 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   const response: Record<string, unknown> = { success: true };
   if (enabled !== undefined) response.enabled = enabled;
   if (label !== undefined) response.label = label;
+  if (accountName !== undefined) response.accountName = accountName;
+  if (accountEmail !== undefined) response.accountEmail = accountEmail;
+  if (externalId !== undefined) response.externalId = externalId;
+  if (options !== undefined) response.options = options;
   res.json(response);
 });

@@ -95,17 +95,26 @@ export interface ApiKey {
   id: number;
   platform: Platform;
   label: string;
+  accountName?: string | null;
+  accountEmail?: string | null;
+  externalId?: string | null;
+  options?: Record<string, unknown>;
   maskedKey: string;
   status: KeyStatus;
   enabled: boolean;
   createdAt: string;
   lastCheckedAt: string | null;
+  baseUrl?: string | null;
 }
 
 export interface ApiKeyCreate {
   platform: Platform;
   key: string;
   label?: string;
+  accountName?: string;
+  accountEmail?: string;
+  externalId?: string;
+  options?: Record<string, unknown>;
 }
 
 // ---- Fallback Config ----

@@ -52,6 +52,8 @@ describe('Full Integration Flow', () => {
     expect(body.length).toBeGreaterThanOrEqual(50);
     expect(body[0]).toHaveProperty('modelId');
     expect(body[0]).toHaveProperty('hasProvider');
+    expect(body[0]).toHaveProperty('catalogStatus');
+    expect(body[0]).toHaveProperty('routable');
     // All should have providers (catches drift between catalog and providers/index.ts)
     for (const m of body) {
       expect(m.hasProvider).toBe(true);
@@ -80,10 +82,29 @@ describe('Full Integration Flow', () => {
       platform: 'groq',
       key: 'gsk_integration_test_key',
       label: 'Integration Test',
+      accountName: 'Primary Groq',
+      accountEmail: 'groq@example.com',
+      externalId: 'groq-main',
+      options: { region: 'us', tier: 'free' },
     });
     expect(status).toBe(201);
     expect(body.platform).toBe('groq');
     expect(body.maskedKey).toContain('...');
+    expect(body.accountName).toBe('Primary Groq');
+    expect(body.accountEmail).toBe('groq@example.com');
+    expect(body.externalId).toBe('groq-main');
+    expect(body.options).toEqual({ region: 'us', tier: 'free' });
+  });
+
+  it('Step 4b: Key metadata persists in the key list', async () => {
+    const { status, body } = await req(app, 'GET', '/api/keys');
+    expect(status).toBe(200);
+    const row = body.find((k: any) => k.label === 'Integration Test');
+    expect(row).toBeDefined();
+    expect(row.accountName).toBe('Primary Groq');
+    expect(row.accountEmail).toBe('groq@example.com');
+    expect(row.externalId).toBe('groq-main');
+    expect(row.options).toEqual({ region: 'us', tier: 'free' });
   });
 
   it('Step 5: Proxy routes to Groq and handles provider error gracefully', async () => {
@@ -135,6 +156,9 @@ describe('Full Integration Flow', () => {
     expect(status).toBe(200);
     expect(body).toHaveProperty('platforms');
     expect(body).toHaveProperty('keys');
+    expect(body).toHaveProperty('routingOverview');
+    expect(body.routingOverview).toHaveProperty('routableModels');
+    expect(body).toHaveProperty('downtimeOverview');
   });
 
   it('Step 9: Delete a key if any exist', async () => {

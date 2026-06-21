@@ -160,4 +160,20 @@ describe('Routing Key Exhaustion', () => {
       expect(result.modelId).toBe('gemini-1.5-flash');
     });
   });
+
+  it('excludes catalog-removed models from the active chain before key selection', () => {
+    const db = getDb();
+
+    db.prepare(`
+      INSERT INTO provider_catalog_models (id, provider_slug, provider_model_id, display_name, status)
+      VALUES ('removed-pro', 'google', 'gemini-1.5-pro', 'Pro', 'removed')
+      ON CONFLICT(provider_slug, provider_model_id) DO UPDATE SET status = excluded.status
+    `).run();
+
+    (ratelimit.canMakeRequest as any).mockReturnValue(true);
+    (ratelimit.canUseTokens as any).mockReturnValue(true);
+
+    const result = routeRequest(100);
+    expect(result.modelId).toBe('gemini-1.5-flash');
+  });
 });

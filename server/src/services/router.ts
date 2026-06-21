@@ -527,6 +527,9 @@ const GLOBAL_SORT_ALIASES: Record<string, string> = {
   balanced: 'balanced',
 };
 
+const CATALOG_ROUTABLE_STATUSES = ['active', 'candidate'] as const;
+const CATALOG_ROUTABLE_STATUS_SQL = CATALOG_ROUTABLE_STATUSES.map(status => `'${status}'`).join(', ');
+
 function getActiveChain(db: Database): ChainRow[] {
   const activeProfileSetting = db.prepare("SELECT value FROM settings WHERE key = 'active_profile_id'").get() as { value: string } | undefined;
   if (activeProfileSetting) {
@@ -539,7 +542,10 @@ function getActiveChain(db: Database): ChainRow[] {
              m.supports_tools, m.context_window, m.key_id
       FROM profile_models pm
       JOIN models m ON m.id = pm.model_db_id AND m.enabled = 1
+      LEFT JOIN provider_catalog_models pcm
+        ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
       WHERE pm.profile_id = ?
+        AND (pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL}))
       ORDER BY pm.priority ASC
     `).all(profileId) as ChainRow[];
     
@@ -554,6 +560,9 @@ function getActiveChain(db: Database): ChainRow[] {
            m.supports_tools, m.context_window, m.key_id
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id AND m.enabled = 1
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
+    WHERE pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL})
     ORDER BY fc.priority ASC
   `).all() as ChainRow[];
 }
@@ -570,7 +579,10 @@ function getChainByProfileName(db: Database, name: string): ChainRow[] | null {
            m.supports_tools, m.context_window, m.key_id
     FROM profile_models pm
     JOIN models m ON m.id = pm.model_db_id AND m.enabled = 1
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE pm.profile_id = ?
+      AND (pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL}))
     ORDER BY pm.priority ASC
   `).all(profile.id) as ChainRow[];
 }
@@ -583,7 +595,10 @@ function getChainByGlobalSort(db: Database, globalAxis: string): ChainRow[] {
            m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
            m.supports_tools, m.context_window, m.key_id
     FROM models m
+    LEFT JOIN provider_catalog_models pcm
+      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE m.enabled = 1
+      AND (pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL}))
   `).all() as ChainRow[];
 
   const strategyMap: Record<string, RoutingStrategy> = {

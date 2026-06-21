@@ -80,13 +80,17 @@ function createTables(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       platform TEXT NOT NULL,
       label TEXT NOT NULL DEFAULT '',
+      account_name TEXT,
+      account_email TEXT,
+      external_id TEXT,
       encrypted_key TEXT NOT NULL,
       iv TEXT NOT NULL,
       auth_tag TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'unknown',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      last_checked_at TEXT
+      last_checked_at TEXT,
+      options_json TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE TABLE IF NOT EXISTS requests (
@@ -226,6 +230,7 @@ function createTables(db: Database.Database) {
 
   ensureRequestKeyIdColumn(db);
   ensureApiKeysBaseUrlColumn(db);
+  ensureApiKeysExtendedOptionsColumns(db);
   ensureModelsKeyIdColumn(db);
   ensureRequestTtfbColumn(db);
   ensureRequestRequestedModelColumn(db);
@@ -266,6 +271,22 @@ function ensureApiKeysBaseUrlColumn(db: Database.Database) {
   const columns = db.prepare('PRAGMA table_info(api_keys)').all() as { name: string }[];
   if (!columns.some(col => col.name === 'base_url')) {
     db.prepare('ALTER TABLE api_keys ADD COLUMN base_url TEXT').run();
+  }
+}
+
+function ensureApiKeysExtendedOptionsColumns(db: Database.Database) {
+  const columns = db.prepare('PRAGMA table_info(api_keys)').all() as { name: string }[];
+  if (!columns.some(col => col.name === 'account_name')) {
+    db.prepare('ALTER TABLE api_keys ADD COLUMN account_name TEXT').run();
+  }
+  if (!columns.some(col => col.name === 'account_email')) {
+    db.prepare('ALTER TABLE api_keys ADD COLUMN account_email TEXT').run();
+  }
+  if (!columns.some(col => col.name === 'external_id')) {
+    db.prepare('ALTER TABLE api_keys ADD COLUMN external_id TEXT').run();
+  }
+  if (!columns.some(col => col.name === 'options_json')) {
+    db.prepare("ALTER TABLE api_keys ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'").run();
   }
 }
 
