@@ -7,9 +7,11 @@ import { keysRouter } from './routes/keys.js';
 import { modelsRouter } from './routes/models.js';
 import { proxyRouter } from './routes/proxy.js';
 import { responsesRouter } from './routes/responses.js';
+import { anthropicRouter } from './routes/anthropic.js';
 import { fallbackRouter } from './routes/fallback.js';
 import { profilesRouter } from './routes/profiles.js';
 import { embeddingsRouter } from './routes/embeddings.js';
+import { mediaRouter } from './routes/media.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { analyticsExtraRouter } from './routes/analytics-extra.js';
 import { healthRouter } from './routes/health.js';
@@ -99,6 +101,7 @@ export function createApp() {
   app.use('/api/profiles', requireAuth, profilesRouter);
   app.use('/api/fallback', requireAuth, fallbackRouter);
   app.use('/api/embeddings', requireAuth, embeddingsRouter);
+  app.use('/api/media', requireAuth, mediaRouter);
   app.use('/api/analytics', requireAuth, analyticsRouter);
   app.use('/api/analytics', requireAuth, analyticsExtraRouter);
   app.use('/api/health', requireAuth, healthRouter);
@@ -110,6 +113,12 @@ export function createApp() {
   app.use('/api/storage', requireAuth, storageRouter);
 
   app.use('/v1', createProxyRateLimiter());
+  // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
+  // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
+  // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape
+  // when the caller sends `anthropic-version`, else it falls through). All other
+  // paths it doesn't own fall through to the OpenAI router untouched.
+  app.use('/v1', anthropicRouter);
   app.use('/v1', proxyRouter);
   app.use('/v1', responsesRouter);
 

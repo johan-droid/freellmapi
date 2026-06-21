@@ -9,12 +9,17 @@ import { startHealthChecker } from './services/health.js';
 import { getDatabasePath, restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
 import { startCatalogSync } from './services/catalog-sync.js';
 import { applyProxyUrl, applyProxyEnabled, applyProxyBypass } from './lib/proxy.js';
+import { installProcessSafetyNet } from './lib/process-safety-net.js';
 
 const PORT = process.env.PORT ?? 3001;
 // IPv4-only ('0.0.0.0') by default so Render can detect the bound port.
 const HOST = process.env.HOST ?? '0.0.0.0';
 
 async function main() {
+  // Install first so a late provider socket reset (undici HTTP/2 error with no
+  // listener) can't take the proxy down. Genuine bugs still exit 1.
+  installProcessSafetyNet();
+
   await restoreDatabaseBeforeBoot();
   const db = initDb(getDatabasePath());
   hardenDatabase(db);
