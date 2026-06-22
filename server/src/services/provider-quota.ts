@@ -422,7 +422,7 @@ export function getQuotaStateForKeys(): QuotaObservationView[] {
       pqs.notes,
       pqs.observed_at AS observedAt,
       pqs.updated_at AS updatedAt,
-      pa.id AS providerAccountId,
+      NULL AS providerAccountId,
       latest.model_id AS modelId,
       latest.endpoint AS endpoint,
       latest.status_code AS statusCode,
@@ -430,8 +430,6 @@ export function getQuotaStateForKeys(): QuotaObservationView[] {
       latest.raw_json AS rawJson,
       latest.created_at AS createdAt
     FROM provider_quota_state pqs
-    LEFT JOIN api_keys ak ON ak.id = pqs.key_id
-    LEFT JOIN provider_accounts pa ON pa.linked_api_key_id = ak.id
     LEFT JOIN latest
       ON latest.platform = pqs.platform
      AND latest.key_id = pqs.key_id
