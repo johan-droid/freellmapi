@@ -27,7 +27,7 @@ describe('GoogleProvider', () => {
       },
     };
 
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve(mockResponse),
     } as any);
@@ -44,6 +44,11 @@ describe('GoogleProvider', () => {
     expect(result.usage.prompt_tokens).toBe(10);
     expect(result.usage.completion_tokens).toBe(5);
     expect(result._routed_via?.platform).toBe('google');
+
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    const calledInit = fetchSpy.mock.calls[0][1] as any;
+    expect(calledUrl).not.toContain('key=');
+    expect(calledInit.headers['x-goog-api-key']).toBe('test-key');
   });
 
   it('converts an image_url data URL into a Gemini inlineData part (#118)', async () => {
@@ -82,8 +87,13 @@ describe('GoogleProvider', () => {
   });
 
   it('should validate key via models endpoint', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: true } as any);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as any);
     expect(await provider.validateKey('valid-key')).toBe(true);
+
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    const calledInit = fetchSpy.mock.calls[0][1] as any;
+    expect(calledUrl).not.toContain('key=');
+    expect(calledInit.headers['x-goog-api-key']).toBe('valid-key');
 
     vi.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: false, status: 401 } as any);
     expect(await provider.validateKey('invalid-key')).toBe(false);

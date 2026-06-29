@@ -417,10 +417,13 @@ export class GoogleProvider extends BaseProvider {
     };
     if (systemInstruction) body.systemInstruction = systemInstruction;
 
-    const url = `${API_BASE}/models/${modelId}:generateContent?key=${apiKey}`;
+    const url = `${API_BASE}/models/${modelId}:generateContent`;
     const res = await this.fetchWithTimeout(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify(body),
     });
 
@@ -492,10 +495,13 @@ export class GoogleProvider extends BaseProvider {
     };
     if (systemInstruction) body.systemInstruction = systemInstruction;
 
-    const url = `${API_BASE}/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const url = `${API_BASE}/models/${modelId}:streamGenerateContent?alt=sse`;
     const res = await this.fetchWithTimeout(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify(body),
     });
 
@@ -629,8 +635,11 @@ export class GoogleProvider extends BaseProvider {
     // Transport errors propagate — health.ts marks status='error' without
     // counting toward auto-disable.
     const res = await this.fetchWithTimeout(
-      `${API_BASE}/models?key=${apiKey}`,
-      { method: 'GET' },
+      `${API_BASE}/models`,
+      {
+        method: 'GET',
+        headers: { 'x-goog-api-key': apiKey },
+      },
       10000,
     );
     recordQuotaObservationsFromResponse(res, {

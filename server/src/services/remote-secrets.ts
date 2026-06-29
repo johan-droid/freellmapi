@@ -71,6 +71,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
       ssl: env.DATABASE_SSL === 'disable'
         ? undefined
         : { rejectUnauthorized: env.DATABASE_SSL === 'strict' },
+      connectionTimeoutMillis: 15000,
     });
 
     async function ensureSchema() {
@@ -253,6 +254,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
     encoding: 'utf8',
     env: process.env,
     maxBuffer: 10 * 1024 * 1024,
+    timeout: 30000,
   });
 
   if (result.status !== 0) {
@@ -289,6 +291,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
       ssl: env.DATABASE_SSL === 'disable'
         ? undefined
         : { rejectUnauthorized: env.DATABASE_SSL === 'strict' },
+      connectionTimeoutMillis: 15000,
     });
 
     async function ensureSchema() {

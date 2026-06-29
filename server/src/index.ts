@@ -1,4 +1,7 @@
 import './env.js';
+import { installLogRedaction } from './lib/redact.js';
+installLogRedaction();
+
 import { createApp } from './app.js';
 import { initDb, getDb, getSetting } from './db/index.js';
 import { startHealthChecker } from './services/health.js';

@@ -73,6 +73,7 @@ function runPostgresDbCommand(action: 'pull' | 'push', payload?: string): string
       ssl: env.DATABASE_SSL === 'disable'
         ? undefined
         : { rejectUnauthorized: env.DATABASE_SSL === 'strict' },
+      connectionTimeoutMillis: 15000,
     });
 
     async function ensureSchema() {
@@ -123,6 +124,7 @@ function runPostgresDbCommand(action: 'pull' | 'push', payload?: string): string
     encoding: 'utf8',
     env: process.env,
     maxBuffer: 50 * 1024 * 1024,
+    timeout: 30000,
   });
 
   if (result.status !== 0) {
@@ -148,6 +150,7 @@ async function runPostgresDbCommandAsync(action: 'push', payload: string): Promi
       ssl: env.DATABASE_SSL === 'disable'
         ? undefined
         : { rejectUnauthorized: env.DATABASE_SSL === 'strict' },
+      connectionTimeoutMillis: 15000,
     });
 
     async function ensureSchema() {
@@ -221,41 +224,31 @@ export async function restoreDatabaseBeforeBoot(): Promise<void> {
 
   // 1. Try PostgreSQL / Neon restore first if DATABASE_URL is set
   if (resolveDatabaseUrlEnv()) {
-    try {
-      console.log('[persistence] Attempting to restore database from PostgreSQL Neon store...');
-      const base64Data = runPostgresDbCommand('pull');
-      if (base64Data && base64Data.trim().length > 0) {
-        const zipped = Buffer.from(base64Data.trim(), 'base64');
-        const restored = gunzipSync(zipped);
-        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-        fs.writeFileSync(dbPath, restored);
-        persistenceRestoreStatus = 'restored';
-        console.log(`[persistence] Restored SQLite database from PostgreSQL Neon store to ${dbPath}`);
-        return;
-      }
-      console.warn('[persistence] No SQLite database backup found in PostgreSQL Neon store.');
-    } catch (error) {
-      console.warn(`[persistence] PostgreSQL Neon restore failed: ${(error as Error).message}`);
+    console.log('[persistence] Attempting to restore database from PostgreSQL Neon store...');
+    const base64Data = runPostgresDbCommand('pull');
+    if (base64Data && base64Data.trim().length > 0) {
+      const zipped = Buffer.from(base64Data.trim(), 'base64');
+      const restored = gunzipSync(zipped);
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      fs.writeFileSync(dbPath, restored);
+      persistenceRestoreStatus = 'restored';
+      console.log(`[persistence] Restored SQLite database from PostgreSQL Neon store to ${dbPath}`);
+      return;
     }
+    console.warn('[persistence] No SQLite database backup found in PostgreSQL Neon store.');
   }
 
   // 2. Try Backblaze B2 restore as fallback if configured
   if (hasRemoteSnapshotConfig()) {
-    try {
-      const restored = await downloadDbSnapshot(dbPath);
-      if (restored) {
-        persistenceRestoreStatus = 'restored';
-        console.log(`[persistence] Restored SQLite database from remote object storage to ${dbPath}`);
-        return;
-      }
-      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      persistenceRestoreStatus = 'fresh';
-      console.warn('[persistence] No remote DB snapshot found; creating a new local SQLite DB.');
-    } catch (error) {
-      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      persistenceRestoreStatus = 'fresh';
-      console.warn(`[persistence] Remote DB restore failed; creating a new local SQLite DB: ${(error as Error).message}`);
+    const restored = await downloadDbSnapshot(dbPath);
+    if (restored) {
+      persistenceRestoreStatus = 'restored';
+      console.log(`[persistence] Restored SQLite database from remote object storage to ${dbPath}`);
+      return;
     }
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    persistenceRestoreStatus = 'fresh';
+    console.warn('[persistence] No remote DB snapshot found; creating a new local SQLite DB.');
     return;
   }
 
