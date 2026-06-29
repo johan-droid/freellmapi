@@ -9,6 +9,8 @@ import { NodeScheduler } from './lib/scheduler.js';
 import { loadConfig } from './lib/config.js';
 import { applyDeclarativeConfigFromEnv } from './services/declarative-config.js';
 import { restoreDbBackupIfNeeded, startDbBackupPump } from './lib/db-backup.js';
+import { hydrateSecretsFromRemote } from './services/remote-secrets.js';
+import { restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
 
 async function main() {
   const config = loadConfig();
@@ -20,12 +22,26 @@ async function main() {
 
   const scheduler = new NodeScheduler();
 
+  // Restore SQLite database from Backblaze B2/Litestream if configured
+  await restoreDatabaseBeforeBoot();
+
   if (config.dbPath) {
     await restoreDbBackupIfNeeded(config.dbPath);
   } else {
     await restoreDbBackupIfNeeded();
   }
   initDb(config.dbPath ?? undefined);
+
+  const stopSnapshots = startDatabaseSnapshotLoop();
+
+  try {
+    if (hydrateSecretsFromRemote(getDb())) {
+      console.log('[remote-secrets] Successfully hydrated secrets from remote store');
+    }
+  } catch (err) {
+    console.warn(`[remote-secrets] Failed to hydrate secrets from remote store: ${err instanceof Error ? err.message : err}`);
+  }
+
   applyDeclarativeConfigFromEnv();
 
   // Load the persisted proxy settings from the DB (env var wins if set).
@@ -46,6 +62,7 @@ async function main() {
   };
 
   const server = app.listen(Number(PORT), HOST, onReady(HOST));
+  server.on('close', stopSnapshots);
   server.on('error', (err: NodeJS.ErrnoException) => {
     // The default '::' bind fails where IPv6 is disabled (kernel
     // ipv6.disable=1 and the like) — retry IPv4-only rather than dying.
