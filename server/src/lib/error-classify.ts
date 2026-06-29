@@ -52,6 +52,9 @@ export function isRetryableError(err: any): boolean {
     // which comes from the OpenAI-compat provider's error formatting, not
     // a bare "400" which is deliberately non-retryable for validation errors.
     || msg.includes('api error 400')
+    // Provider-side auth/plan gating on an otherwise valid routed request:
+    // rotate to another provider/key instead of hard-failing the whole call.
+    || isProviderAuthFailoverError(err)
     // 402: this provider/key is out of credits (e.g. HuggingFace Router
     // "API error 402: Payment required"). The SAME model often lives on another
     // provider (Kimi K2.6 is on HF + Cloudflare + NVIDIA), so fail over instead
@@ -66,6 +69,23 @@ export function isRetryableError(err: any): boolean {
     || msg.includes('stream ended unexpectedly')
     || msg.includes('stream stalled')
     || msg.includes('unparseable inline tool-call dialect');
+}
+
+// Upstream provider auth/authorization failures are failover-safe inside the
+// router: another provider or account may still satisfy the request. Keep this
+// narrower than a generic local 401/403 so we do not reclassify our own API
+// auth/validation errors.
+export function isProviderAuthFailoverError(err: any): boolean {
+  const msg = (err?.message ?? '').toLowerCase();
+  if (!msg.includes('api error')) return false;
+
+  return (
+    msg.includes('api error 401')
+    || msg.includes('api error 403')
+    || msg.includes('authentication error')
+    || msg.includes('invalid authentication')
+    || msg.includes('access forbidden')
+  );
 }
 
 // A 402 Payment Required / out-of-credits error. Distinct from a transient 429:

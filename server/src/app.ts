@@ -23,6 +23,8 @@ import { storageRouter } from './routes/storage.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createProxyRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import type { Config } from './lib/config.js';
+import { loadConfig } from './lib/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,70 +34,37 @@ const DEFAULT_DASHBOARD_ORIGINS = [
   'http://[::1]:5173',
 ];
 
-function getAllowedCorsOrigins() {
-  const configuredOrigins = (process.env.DASHBOARD_ORIGINS ?? process.env.CORS_ORIGIN ?? process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean);
-
-  return new Set([...DEFAULT_DASHBOARD_ORIGINS, ...configuredOrigins]);
-}
-
-export function createApp() {
+export function createApp(config?: Config) {
+  const cfg = config ?? loadConfig();
   const app = express();
-  const allowedCorsOrigins = getAllowedCorsOrigins();
+  const allowedCorsOrigins = new Set([
+    ...DEFAULT_DASHBOARD_ORIGINS,
+    ...cfg.dashboardOrigins,
+  ]);
 
-  app.disable('x-powered-by');
-  app.set('trust proxy', 1);
-
-  app.use(helmet({
-    contentSecurityPolicy: {
-      useDefaults: true,
-      directives: {
-        defaultSrc: ["'self'"],
-        baseUri: ["'self'"],
-        frameAncestors: ["'none'"],
-        objectSrc: ["'none'"],
-        scriptSrc: ["'self'"],
-        // Tailwind/shadcn use generated style attributes/classes. Keep inline
-        // styles allowed while blocking external style origins.
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:'],
-        fontSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", ...allowedCorsOrigins],
-        upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
-      },
-    },
-    hsts: process.env.NODE_ENV === 'production' ? { maxAge: 15552000, includeSubDomains: false } : false,
-    referrerPolicy: { policy: 'no-referrer' },
-    crossOriginResourcePolicy: { policy: 'same-origin' },
-  }));
+  // CSP intentionally disabled — the SPA bundles inline styles and the OG
+  // image is loaded from the same origin; enabling helmet's default CSP
+  // breaks the React build's hashed-asset loader. HSTS off because this is
+  // a single-user local proxy, served over HTTP on localhost. Both should
+  // stay disabled unless someone serves the proxy over HTTPS publicly
+  // (which is also not a supported deployment — see README).
+  app.use(helmet({ contentSecurityPolicy: false, hsts: false }));
   app.use(cors({
     origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
       callback(null, !origin || allowedCorsOrigins.has(origin));
     },
-    credentials: false,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-FreeLLMAPI-Client', 'X-Client-Name'],
-    maxAge: 600,
   }));
   // 10mb: code agents (OpenCode, AionUI, Qwen Code) ship very large system
   // prompts + tool schemas + repo context; 1mb cut their sessions off
   // mid-conversation with an opaque 413. (#200)
   app.use(express.json({ limit: '10mb' }));
 
-  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? '1mb' }));
-
-  // Never cache authenticated/admin API responses. Several endpoints expose
-  // masked credential metadata or one-time key reveals/regenerations.
-  app.use('/api', (_req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Pragma', 'no-cache');
-    next();
-  });
-
+  // Dashboard auth (#35): /api/auth/{status,setup,login} bootstrap without a
+  // session; everything else under /api/* requires a logged-in dashboard user.
+  // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
   app.use('/api/auth', authRouter);
 
+  // API routes — all admin endpoints sit behind requireAuth.
   app.use('/api/keys', requireAuth, keysRouter);
   app.use('/api/models', requireAuth, modelsRouter);
   app.use('/api/profiles', requireAuth, profilesRouter);
@@ -112,7 +81,10 @@ export function createApp() {
   app.use('/api/model-discovery', requireAuth, modelDiscoveryRouter);
   app.use('/api/storage', requireAuth, storageRouter);
 
-  app.use('/v1', createProxyRateLimiter());
+  // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
+  // it throttles unauthenticated brute-force / flood attempts before any
+  // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
+  app.use('/v1', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   // Anthropic-compatible Messages API (`POST /v1/messages`, `/count_tokens`) for
   // Claude Code and anything else speaking the Anthropic SDK. Mounted BEFORE the
   // OpenAI router so it can content-negotiate `GET /v1/models` (Anthropic shape
@@ -120,35 +92,36 @@ export function createApp() {
   // paths it doesn't own fall through to the OpenAI router untouched.
   app.use('/v1', anthropicRouter);
   app.use('/v1', proxyRouter);
+  // OpenAI Responses API shim (Codex CLI requires wire_api="responses"; see #96)
   app.use('/v1', responsesRouter);
 
+  // Health check
   app.get('/api/ping', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // Error handler (for API routes)
   app.use(errorHandler);
 
-  // Serve client static files (after API error handler)
-  const clientDist = process.env.CLIENT_DIST
-    ? path.resolve(process.env.CLIENT_DIST)
-    : path.resolve(__dirname, '../../client/dist');
-  app.use(express.static(clientDist, {
-    etag: true,
-    maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
-    setHeaders(res, filePath) {
-      if (filePath.endsWith('index.html')) {
-        res.setHeader('Cache-Control', 'no-cache');
+  // Serve client static files (after API error handler). CLIENT_DIST lets
+  // embedders relocate the built dashboard (e.g. the desktop app ships it in
+  // extraResources, where the __dirname-relative path can't reach).
+  // Set serveStaticAssets: false in Config to skip static serving entirely
+  // (e.g. in runtimes that serve assets through a different mechanism).
+  if (cfg.serveStaticAssets) {
+    const clientDist = cfg.clientDist
+      ? path.resolve(cfg.clientDist)
+      : path.resolve(__dirname, '../../client/dist');
+    app.use(express.static(clientDist));
+    // SPA fallback — serve index.html for non-API routes
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
+        next();
+        return;
       }
-    },
-  }));
-  // SPA fallback — serve index.html for non-API routes
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
-      next();
-      return;
-    }
-    res.sendFile(path.join(clientDist, 'index.html'));
-  });
+      res.sendFile(path.join(clientDist, 'index.html'));
+    });
+  }
 
   return app;
 }

@@ -111,6 +111,19 @@ function FusionTrace({ panel, judge, streaming, answerStarted }: {
 export default function PlaygroundPage() {
   const { t } = useI18n()
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  // Optional system prompt for this Playground session. Client-side only:
+  // when set, it's prepended as a `system` message to the request. Persisted
+  // to localStorage so it survives reloads.
+  const [systemPrompt, setSystemPrompt] = useState<string>(
+    () => localStorage.getItem('playground.systemPrompt') ?? '',
+  )
+  const [systemPromptOpen, setSystemPromptOpen] = useState<boolean>(
+    () => !!localStorage.getItem('playground.systemPrompt'),
+  )
+  const updateSystemPrompt = (v: string) => {
+    setSystemPrompt(v)
+    localStorage.setItem('playground.systemPrompt', v)
+  }
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>(
@@ -212,9 +225,12 @@ export default function PlaygroundPage() {
       if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
 
       const isFusion = selectedModel === 'fusion'
+      const sysPrompt = systemPrompt.trim()
       const body: any = {
-        messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-        stream: true,
+        messages: [
+          ...(sysPrompt ? [{ role: 'system', content: sysPrompt }] : []),
+          ...newMessages.map(m => ({ role: m.role, content: m.content })),
+        ],
       }
       if (selectedModel !== 'auto') body.model = selectedModel
       // Fusion streams its panel + judge trace; ask for a stream so the
@@ -246,85 +262,33 @@ export default function PlaygroundPage() {
         await streamFusion(res.body, newMessages, start)
         return
       }
-      const via = routedVia ? {
+
+      const data = await res.json()
+      const content = data.choices?.[0]?.message?.content ?? JSON.stringify(data, null, 2)
+      const via = data._routed_via ?? (routedVia ? {
         platform: routedVia.split('/')[0],
         model: routedVia.split('/').slice(1).join('/'),
-      } : undefined
+      } : undefined)
 
-      const assistantIndex = newMessages.length
+      // Fusion responses carry a structured routing summary so we can show the
+      // panel models that replied + the judge, rather than parsing the compact
+      // X-Routed-Via string.
+      const fusion = data._fusion as
+        | { panel: { platform: string; model: string }[]; judge: { platform: string; model: string } | null }
+        | undefined
+
       setMessages([...newMessages, {
         role: 'assistant',
-        content: '',
+        content,
         meta: {
           platform: via?.platform,
           model: via?.model,
           latency,
           fallbackAttempts: fallbackAttempts ? parseInt(fallbackAttempts) : undefined,
+          fusionPanel: fusion?.panel,
+          fusionJudge: fusion?.judge,
         },
       }])
-
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('Streaming response body is unavailable')
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let content = ''
-      let pending = ''
-      let lastFlush = 0
-
-      const flush = (force = false) => {
-        const now = Date.now()
-        if (!pending || (!force && now - lastFlush < 50)) return
-        content += pending
-        pending = ''
-        lastFlush = now
-        setMessages(current => {
-          const next = [...current]
-          if (next[assistantIndex]) next[assistantIndex] = { ...next[assistantIndex], content }
-          return next
-        })
-      }
-
-      const appendDelta = (value: unknown) => {
-        if (typeof value === 'string') {
-          pending += value
-        } else if (Array.isArray(value)) {
-          pending += value.map(part => typeof part?.text === 'string' ? part.text : '').join('')
-        }
-        flush()
-      }
-
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        let eventEnd = buffer.indexOf('\n\n')
-        while (eventEnd !== -1) {
-          const rawEvent = buffer.slice(0, eventEnd)
-          buffer = buffer.slice(eventEnd + 2)
-          for (const line of rawEvent.split(/\r?\n/)) {
-            if (!line.startsWith('data:')) continue
-            const payload = line.slice(5).trim()
-            if (!payload || payload === '[DONE]') continue
-            const chunk = JSON.parse(payload)
-            if (chunk.error?.message) throw new Error(chunk.error.message)
-            appendDelta(chunk.choices?.[0]?.delta?.content)
-          }
-          eventEnd = buffer.indexOf('\n\n')
-        }
-      }
-      flush(true)
-
-      if (!content.trim()) {
-        setMessages(current => {
-          const next = [...current]
-          if (next[assistantIndex]) {
-            next[assistantIndex] = { ...next[assistantIndex], content: 'No text returned by the provider.' }
-          }
-          return next
-        })
-      }
     } catch (err: any) {
       setMessages([...newMessages, {
         role: 'assistant',
@@ -354,9 +318,6 @@ export default function PlaygroundPage() {
   // per-provider, not global, so tier-first matches the server's preset; #135.)
   const pickerOptions = [
     { value: 'auto', label: t('playground.autoModel'), sub: '', isNew: false, platforms: [] as string[] },
-    { value: 'coding', label: t('playground.autoModelCoding'), sub: '', isNew: false, platforms: [] as string[] },
-    { value: 'thinking', label: t('playground.autoModelThinking'), sub: '', isNew: false, platforms: [] as string[] },
-    { value: 'agentic', label: t('playground.autoModelAgentic'), sub: '', isNew: false, platforms: [] as string[] },
     { value: 'fusion', label: t('playground.fusionModel'), sub: '', isNew: true, platforms: [] as string[] },
     ...modelOptions
       .slice()
@@ -388,18 +349,12 @@ export default function PlaygroundPage() {
 
   const activeModelLabel = selectedModel === 'auto'
     ? t('playground.autoModel')
-    : selectedModel === 'coding'
-    ? t('playground.autoModelCoding')
-    : selectedModel === 'thinking'
-    ? t('playground.autoModelThinking')
-    : selectedModel === 'agentic'
-    ? t('playground.autoModelAgentic')
     : selectedModel === 'fusion'
     ? t('playground.fusionModel')
     : modelOptions.find(o => o.value === selectedModel)?.label ?? selectedModel
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
+    <div className="flex min-h-0 flex-1 flex-col sm:h-[calc(100vh-8rem)]">
       <PageHeader
         title={t('playground.title')}
         description={t('playground.description')}
@@ -408,12 +363,12 @@ export default function PlaygroundPage() {
             <Popover open={modelPickerOpen} onOpenChange={(o) => { setModelPickerOpen(o); if (!o) setModelQuery('') }}>
               <PopoverTrigger
                 aria-label={t('playground.selectModel')}
-                className="flex h-8 w-[260px] items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+                className="flex h-8 w-full max-w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 sm:w-[260px]"
               >
                 <span className="truncate">{activeModelLabel}</span>
                 <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[300px] p-0">
+              <PopoverContent align="end" className="w-[min(300px,calc(100vw-2rem))] p-0">
                 <div className="flex items-center gap-2 border-b px-3">
                   <Search className="size-4 shrink-0 text-muted-foreground" />
                   <input
@@ -461,8 +416,8 @@ export default function PlaygroundPage() {
         }
       />
 
-      <div className="flex-1 flex flex-col rounded-3xl border bg-card overflow-hidden min-h-0">
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border bg-card">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-center">
               <div className="space-y-2 max-w-sm">
@@ -482,7 +437,7 @@ export default function PlaygroundPage() {
                 const showBubble = msg.role === 'user' || msg.content.length > 0
                 return (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex flex-col gap-1 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`flex max-w-[92%] flex-col gap-1 sm:max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                       {showBubble && (
                         <div
                           className={`group relative rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -562,7 +517,27 @@ export default function PlaygroundPage() {
         </div>
 
         <div className="border-t bg-background/50 p-3">
-          <div className="flex gap-2 items-end">
+          <div className="mb-2">
+            <button
+              type="button"
+              onClick={() => setSystemPromptOpen(o => !o)}
+              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronRight className={`size-3.5 transition-transform ${systemPromptOpen ? 'rotate-90' : ''}`} />
+              {t('playground.systemPromptLabel')}
+              {systemPrompt.trim() && <span className="ml-1 size-1.5 rounded-full bg-primary/70" />}
+            </button>
+            {systemPromptOpen && (
+              <textarea
+                value={systemPrompt}
+                onChange={e => updateSystemPrompt(e.target.value)}
+                placeholder={t('playground.systemPromptPlaceholder')}
+                rows={2}
+                className="mt-1.5 w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[44px] max-h-[160px]"
+              />
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <textarea
               ref={inputRef}
               value={input}
@@ -578,7 +553,7 @@ export default function PlaygroundPage() {
                 el.style.height = Math.min(el.scrollHeight, 160) + 'px'
               }}
             />
-            <Button onClick={handleSend} disabled={loading || !input.trim()} size="default">
+            <Button onClick={handleSend} disabled={loading || !input.trim()} size="default" className="w-full sm:w-auto">
               {loading ? t('playground.sending') : t('playground.send')}
             </Button>
           </div>

@@ -5,9 +5,9 @@ import type {
   ChatToolDefinition,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions } from './base.js';
+import { flattenMessageContent } from '../lib/content.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
 import { stripSchemaKeys } from '../lib/tool-args.js';
-import { flattenMessageContent } from '../lib/content.js';
 
 const API_BASE = 'https://api.cohere.ai/compatibility/v1';
 
@@ -45,6 +45,7 @@ export class CohereProvider extends BaseProvider {
       temperature: options?.temperature,
       max_tokens: options?.max_tokens,
       top_p: options?.top_p,
+      stop: options?.stop,
       tools: sanitizeCohereTools(options?.tools),
       tool_choice: options?.tool_choice,
     };
@@ -89,6 +90,7 @@ export class CohereProvider extends BaseProvider {
       temperature: options?.temperature,
       max_tokens: options?.max_tokens,
       top_p: options?.top_p,
+      stop: options?.stop,
       tools: sanitizeCohereTools(options?.tools),
       tool_choice: options?.tool_choice,
       stream: true,

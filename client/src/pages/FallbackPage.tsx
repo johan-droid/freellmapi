@@ -29,6 +29,7 @@ import { PageHeader } from '@/components/page-header'
 import { FloatingBar } from '@/components/floating-bar'
 import { ModelsTabs } from '@/components/models-tabs'
 import { Tooltip } from '@/components/tooltip'
+import { PenaltyInspector } from '@/components/penalty-inspector'
 
 export interface FallbackEntry {
   modelDbId: number
@@ -54,9 +55,10 @@ export interface FallbackEntry {
   contextWindow?: number | null
   supportsVision: boolean
   supportsTools: boolean
-  codingBias: boolean
-  researchBias: boolean
-  chatBias: boolean
+  source?: 'catalog' | 'custom'
+  keyId?: number | null
+  keyLabel?: string | null
+  hasOverrides?: boolean
   keyCount: number
   // Logical-model grouping (sent by the server when unify is relevant). Absent
   // for ungrouped rows; the UI falls back to a per-row "solo" group then.
@@ -276,7 +278,7 @@ export function groupQuotaBadge(
 interface TokenUsageData {
   totalBudget: number
   totalUsed: number
-  models: { displayName: string; platform: string; budget: number; sourceCount?: number; quotaPoolKey?: string }[]
+  models: { displayName: string; platform: string; budget: number }[]
 }
 
 const platformColors: Record<string, string> = {
@@ -295,6 +297,10 @@ const platformColors: Record<string, string> = {
   pollinations: '#a855f7',
   llm7:        '#0ea5e9',
   huggingface: '#ff9d00',
+  routeway:    '#14b8a6',
+  bazaarlink:  '#e11d48',
+  ainative:    '#22c55e',
+  aihorde:     '#dc2626',
 }
 
 // A 0..1 value as a thin horizontal bar with the number beside it.
@@ -319,7 +325,7 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
   const { t } = useI18n()
   const { totalBudget, totalUsed, models } = data
   const remaining = Math.max(0, totalBudget - totalUsed)
-  const remainingPct = totalBudget > 0 ? (remaining / totalBudget) * 100 : 0
+  const remainingPct = totalBudget > 0 ? Math.round((remaining / totalBudget) * 100) : 0
 
   // Collapse the per-model legend to a few rows; the chevron reveals the rest.
   // The toggle only appears when the legend actually overflows the collapsed
@@ -354,9 +360,6 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
           {remainingPct}% {t('models.of')} {formatTokens(totalBudget)}
         </span>
       </div>
-      <p className="mb-3 text-[11px] text-muted-foreground">
-        Estimated from catalog quota labels, not live provider balance. Shared free pools are counted once, and only providers with an enabled key are included.
-      </p>
 
       <div className="flex h-2.5 rounded-full overflow-hidden bg-muted">
         {modelsWithWidth.map((m, i) => (
@@ -391,9 +394,6 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
                 style={{ backgroundColor: platformColors[m.platform] ?? '#94a3b8' }}
               />
               <span className="truncate">{m.displayName}</span>
-              {m.sourceCount && m.sourceCount > 1 && (
-                <span className="text-muted-foreground/70">({m.sourceCount} models)</span>
-              )}
               <span className="flex-1" />
               <span className="font-mono text-muted-foreground">{formatTokens(m.remainingTokens)}</span>
             </div>
@@ -465,11 +465,6 @@ export function RowContent({
 }) {
   const { t } = useI18n()
   const guard = (row.headroom ?? 1) * (row.rateLimit ?? 1)
-  const intentTags = [
-    row.codingBias && { label: t('models.coding'), title: t('models.codingTitle'), className: 'bg-sky-600/15 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300' },
-    row.researchBias && { label: t('models.research'), title: t('models.researchTitle'), className: 'bg-violet-600/15 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300' },
-    row.chatBias && { label: t('models.chat'), title: t('models.chatTitle'), className: 'bg-emerald-600/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300' },
-  ].filter(Boolean) as { label: string; title: string; className: string }[]
   return (
     <>
       <td className="py-2 pl-3 pr-1 w-6 align-middle">
@@ -480,15 +475,6 @@ export function RowContent({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm">{row.displayName}</span>
           <span className="text-xs text-muted-foreground">{row.platform}</span>
-          {intentTags.map(tag => (
-            <span
-              key={tag.label}
-              title={tag.title}
-              className={`text-[10px] rounded-full px-1.5 py-0.5 ${tag.className}`}
-            >
-              {tag.label}
-            </span>
-          ))}
           {row.supportsVision && (
             <span
               title={t('models.visionTitle')}
@@ -704,7 +690,6 @@ export default function FallbackPage() {
   const { data: tokenUsage } = useQuery<TokenUsageData>({
     queryKey: ['fallback', 'token-usage'],
     queryFn: () => apiFetch('/api/fallback/token-usage'),
-    refetchInterval: 15_000,
   })
 
   const { data: routing } = useQuery<RoutingData>({
@@ -871,6 +856,8 @@ export default function FallbackPage() {
           </p>
         </section>
 
+        <PenaltyInspector />
+
         {/* Unified routing / fallback table */}
         {isLoading ? (
           <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -903,7 +890,7 @@ export default function FallbackPage() {
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
                 <button
                   onClick={() => setFilterVision(v => !v)}
                   aria-pressed={filterVision}

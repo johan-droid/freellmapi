@@ -11,96 +11,19 @@ import { getAllPenalties, getRoutingScores, getRoutingStrategy, setRoutingStrate
 import { BANDIT_PRESETS, type RoutingStrategy } from '../services/scoring.js';
 import { parseBudget } from '../lib/budget.js';
 import { getModelGroups } from '../services/model-groups.js';
+import { getPenaltyInspector } from '../services/penalty-inspector.js';
 
 export const fallbackRouter = Router();
-
-type TokenBudgetRow = {
-  platform: string;
-  model_id: string;
-  display_name: string;
-  monthly_token_budget: string;
-  priority: number;
-};
-
-type TokenBudgetGroup = {
-  displayName: string;
-  platform: string;
-  budget: number;
-  sourceCount: number;
-  quotaPoolKey: string;
-};
-
-function quotaPoolKey(row: TokenBudgetRow): string {
-  if (row.platform === 'openrouter' && row.model_id.endsWith(':free')) return 'openrouter::free';
-  if (row.platform === 'openrouter' && row.monthly_token_budget.startsWith('~')) return `openrouter::${row.model_id}`;
-
-  if (['mistral', 'cerebras', 'sambanova', 'cloudflare', 'cohere', 'zhipu', 'ollama', 'kilo', 'pollinations', 'llm7', 'huggingface', 'nvidia', 'opencode'].includes(row.platform)) {
-    return `${row.platform}::shared`;
-  }
-
-  return `${row.platform}::${row.model_id}`;
-}
-
-function poolDisplayName(platform: string, fallbackName: string, sourceCount: number): string {
-  if (sourceCount <= 1) return fallbackName;
-
-  const labels: Record<string, string> = {
-    openrouter: 'OpenRouter free pool',
-    mistral: 'Mistral experiment pool',
-    cerebras: 'Cerebras free pool',
-    sambanova: 'SambaNova free pool',
-    cloudflare: 'Cloudflare Workers AI pool',
-    cohere: 'Cohere trial pool',
-    zhipu: 'Z.ai free pool',
-    ollama: 'Ollama Cloud free pool',
-    kilo: 'Kilo anonymous pool',
-    pollinations: 'Pollinations anonymous pool',
-    llm7: 'LLM7 anonymous pool',
-    huggingface: 'HuggingFace free credit pool',
-    nvidia: 'NVIDIA credit pool',
-    opencode: 'OpenCode free pool',
-  };
-
-  return labels[platform] ?? `${platform} shared pool`;
-}
-
-function groupTokenBudgets(rows: TokenBudgetRow[]): TokenBudgetGroup[] {
-  const groups = new Map<string, TokenBudgetGroup & { priority: number }>();
-
-  for (const row of rows) {
-    const budget = parseBudget(row.monthly_token_budget);
-    if (budget <= 0) continue;
-
-    const key = quotaPoolKey(row);
-    const existing = groups.get(key);
-    if (!existing) {
-      groups.set(key, {
-        displayName: row.display_name,
-        platform: row.platform,
-        budget,
-        sourceCount: 1,
-        quotaPoolKey: key,
-        priority: row.priority,
-      });
-      continue;
-    }
-
-    existing.sourceCount += 1;
-    existing.budget = Math.max(existing.budget, budget);
-    existing.priority = Math.min(existing.priority, row.priority);
-    existing.displayName = poolDisplayName(row.platform, existing.displayName, existing.sourceCount);
-  }
-
-  return [...groups.values()]
-    .sort((a, b) => a.priority - b.priority)
-    .map(({ priority: _priority, ...group }) => group);
-}
 
 // ── Bandit routing strategy ─────────────────────────────────────────────────
 // GET  /routing → active strategy, preset weights, and the per-model score
 //                 breakdown (reliability / speed / intelligence + guardrails).
 fallbackRouter.get('/routing', (_req: Request, res: Response) => {
   res.json(getRoutingScores());
+});
+
+fallbackRouter.get('/penalty-inspector', (_req: Request, res: Response) => {
+  res.json(getPenaltyInspector());
 });
 
 const routingSchema = z.object({
@@ -146,9 +69,12 @@ fallbackRouter.get('/', (_req: Request, res: Response) => {
            m.speed_rank, m.size_label, m.rpm_limit, m.rpd_limit,
            m.tpm_limit, m.tpd_limit, m.context_window,
            m.monthly_token_budget, m.supports_vision, m.supports_tools,
-           m.coding_bias, m.research_bias, m.chat_bias
+           m.key_id, ak.label AS key_label,
+           mo.overrides_json IS NOT NULL AS has_overrides
     FROM fallback_config fc
     JOIN models m ON m.id = fc.model_db_id
+    LEFT JOIN api_keys ak ON ak.id = m.key_id
+    LEFT JOIN model_overrides mo ON mo.platform = m.platform AND mo.model_id = m.model_id
     WHERE m.enabled = 1
     ORDER BY fc.priority ASC
   `).all() as any[];
@@ -207,9 +133,10 @@ fallbackRouter.get('/', (_req: Request, res: Response) => {
       monthlyTokenBudgetTokens: parseBudget(r.monthly_token_budget),
       supportsVision: r.supports_vision === 1,
       supportsTools: r.supports_tools === 1,
-      codingBias: r.coding_bias === 1,
-      researchBias: r.research_bias === 1,
-      chatBias: r.chat_bias === 1,
+      source: r.platform === 'custom' || r.key_id != null ? 'custom' : 'catalog',
+      keyId: r.key_id ?? null,
+      keyLabel: r.key_label ?? null,
+      hasOverrides: Boolean(r.has_overrides),
       keyCount: keyCountMap.get(r.platform) ?? 0,
     };
   }));
@@ -311,7 +238,7 @@ fallbackRouter.post('/sort/:preset', (req: Request, res: Response) => {
   res.json({ success: true, preset });
 });
 
-// Estimated token usage per quota pool for the stacked bar.
+// Token usage per model for the stacked bar
 fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
   const db = getDb();
 

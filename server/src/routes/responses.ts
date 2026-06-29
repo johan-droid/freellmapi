@@ -11,24 +11,15 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { routeRequest, recordRateLimitHit, recordSuccess, hasEnabledToolsModel, type RouteResult } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS, learnLimitFromError } from '../services/ratelimit.js';
-import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { rescueInlineToolCalls, startsWithDialectMarker, couldBecomeDialectMarker, containsDialectMarker } from '../lib/tool-call-rescue.js';
-import {
-  applyBrokerHeaders,
-  buildBrokerContext,
-  getStickyModelFromSession,
-  logRouteDecision,
-  markModelUnavailableFromError,
-  rememberSessionRoute,
-} from '../services/broker.js';
 import {
   isRetryableError,
   isPaymentRequiredError,
   isModelNotFoundError,
   isModelAccessForbiddenError,
-  isProviderAuthFailoverError,
   timingSafeStringEqual,
   extractApiToken,
   getRequestGroupId,
@@ -39,7 +30,6 @@ import {
 } from './proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
-import { detectRequestIntent, isAutoModel, overrideIntentFromModel } from '../services/request-intent.js';
 
 export const responsesRouter = Router();
 
@@ -228,6 +218,10 @@ export function toChatToolChoice(tc?: ResponsesRequest['tool_choice']): ChatTool
   return { type: 'function', function: { name: tc.name } };
 }
 
+function requestDeclaresToolUse(req: ResponsesRequest): boolean {
+  return (req.tools?.length ?? 0) > 0 && req.tool_choice !== 'none';
+}
+
 // ── Build the final (non-stream) Responses object ─────────────────────────
 export function buildResponseObject(opts: {
   id: string;
@@ -329,11 +323,10 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   const stream = reqData.stream ?? false;
   const messages = toChatMessages(reqData);
   const tools = toChatTools(reqData.tools);
-  const requestIntent = overrideIntentFromModel(detectRequestIntent(messages, reqData.tools as any[]), reqData.model);
   // name → parameter schema, for repairing double-encoded tool arguments on
   // the way back out (see lib/tool-args.ts).
   const toolSchemas = toolSchemaMap(tools);
-  const tool_choice = toChatToolChoice(reqData.tool_choice);
+  const tool_choice = tools?.length ? toChatToolChoice(reqData.tool_choice) : undefined;
   const completionOpts = {
     temperature: reqData.temperature ?? undefined,
     max_tokens: reqData.max_output_tokens ?? undefined,
@@ -351,24 +344,16 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // Optional client-managed session affinity (mirrors /chat/completions).
   const rawSessionId = req.headers['x-session-id'];
   const sessionIdHeader = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
-  const brokerContext = buildBrokerContext(req, {
-    endpoint: 'responses',
-    token,
-    messages,
-    tools,
-    requestedModel: reqData.model,
-    stream,
-    maxTokens: reqData.max_output_tokens,
-  });
+  const preferredModel = getStickyModel(messages, sessionIdHeader);
   const requestedModelLabel = reqData.model ?? 'auto';
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
-  // endpoint) must stay on models that emit structured tool_calls — a model
-  // that serializes the call into text strands the agent harness with a
-  // "successful" run it can't act on. Mirrors the /chat/completions gate.
-  const wantsTools = (reqData.tools?.length ?? 0) > 0 || (tools?.length ?? 0) > 0;
+  // endpoint) must stay on models that emit structured tool_calls. Make the
+  // routing decision from the original Responses payload, not the subset of
+  // function tools we can forward to chat providers, because Codex may include
+  // built-in tool descriptors alongside or instead of function descriptors.
+  const wantsTools = requestDeclaresToolUse(reqData);
   if (wantsTools && !hasEnabledToolsModel()) {
-    applyBrokerHeaders(res, brokerContext);
     res.status(422).json({
       error: {
         message: 'This request includes tools, but no tool-capable model is enabled. Enable a tool-calling model (e.g. GPT-OSS 120B, Gemini 3.5 Flash, GLM-4.7) in the Fallback Chain.',
@@ -377,38 +362,6 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
       },
     });
     return;
-  }
-
-  const effectiveRequestedModel = brokerContext.aliasTarget?.modelId ?? reqData.model;
-  let preferredModel: number | undefined;
-  if (!effectiveRequestedModel || isAutoModel(effectiveRequestedModel)) {
-    preferredModel = getStickyModelFromSession(brokerContext, false, wantsTools) ?? getStickyModel(messages, sessionIdHeader);
-  } else {
-    const db = getDb();
-    const enabled = brokerContext.aliasTarget?.providerSlug
-      ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ? AND enabled = 1')
-        .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
-      : db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1')
-        .get(effectiveRequestedModel) as { id: number } | undefined;
-    if (enabled) {
-      preferredModel = enabled.id;
-    } else {
-      const disabled = brokerContext.aliasTarget?.providerSlug
-        ? db.prepare('SELECT id FROM models WHERE platform = ? AND model_id = ?')
-          .get(brokerContext.aliasTarget.providerSlug, effectiveRequestedModel) as { id: number } | undefined
-        : db.prepare('SELECT id FROM models WHERE model_id = ?')
-          .get(effectiveRequestedModel) as { id: number } | undefined;
-      const reason = disabled ? 'is disabled' : 'is not in the catalog';
-      applyBrokerHeaders(res, brokerContext);
-      res.status(400).json({
-        error: {
-          message: `Model '${reqData.model}' ${reason}. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
-          type: 'invalid_request_error',
-          code: 'model_not_found',
-        },
-      });
-      return;
-    }
   }
 
   const responseId = newId('resp');
@@ -427,32 +380,17 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let route: RouteResult;
     try {
-      route = routeRequest(
-        estimatedTotal,
-        skipKeys.size > 0 ? skipKeys : undefined,
-        preferredModel,
-        false,
-        wantsTools,
-        skipModels.size > 0 ? skipModels : undefined,
-        undefined,
-        requestIntent,
-      );
+      route = routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, false, wantsTools, skipModels.size > 0 ? skipModels : undefined);
     } catch (err: any) {
       const status = lastError ? 429 : (err.status ?? 503);
       const message = lastError
         ? `All models rate-limited. Last error: ${sanitizeProviderErrorMessage(lastError.message)}`
         : err.message;
       const type = lastError ? 'rate_limit_error' : 'routing_error';
-      logRouteDecision(brokerContext, null, {
-        status: 'error',
-        fallbackAttempts: attempt,
-        reason: message,
-      });
       if (streamStarted) {
         sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message, type } } });
         res.end();
       } else {
-        applyBrokerHeaders(res, brokerContext);
         res.status(status).json({ error: { message, type } });
       }
       return;
@@ -531,7 +469,8 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            applyBrokerHeaders(res, brokerContext, route, attempt);
+            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+            if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
             const skeleton = {
               id: responseId, object: 'response', created_at: nowUnix(),
               status: 'in_progress', model: route.modelId, output: [], output_text: '',
@@ -777,12 +716,12 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordSuccess(route.modelDbId);
         setStickyModel(messages, route.modelDbId, sessionIdHeader);
 
-        applyBrokerHeaders(res, brokerContext, route, attempt);
+        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
         res.json(buildResponseObject({
           id: responseId, model: route.modelId, text, toolCalls,
           promptTokens, completionTokens,
         }));
-        logRouteDecision(brokerContext, route, { status: 'success', fallbackAttempts: attempt, reason: 'responses_completed' });
 
         traceRouteEvent('Responses', {
           event: 'ok',
@@ -815,26 +754,21 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
       if (stream && streamStarted) {
         sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: `Provider error (${route.displayName}): stream interrupted`, type: 'stream_error' } } });
         res.end();
-        logRouteDecision(brokerContext, route, { status: 'error', fallbackAttempts: attempt, reason: `stream interrupted: ${err.message}` });
         return;
       }
 
-      if (isRetryableError(err) || isProviderAuthFailoverError(err)) {
+      if (isRetryableError(err)) {
         // Model-level 404: rule out the whole model for this request — its
         // other keys would 404 the same way. (PR #111, credits @barbotkonv.)
         if (isModelNotFoundError(err) || isModelAccessForbiddenError(err)) skipModels.add(route.modelDbId);
         skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
         setCooldown(route.platform, route.modelId, route.keyId, isPaymentRequiredError(err)
           ? PAYMENT_REQUIRED_COOLDOWN_MS
-          : isProviderAuthFailoverError(err)
-            ? 15 * 60 * 1000
           : getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
-        if (!isProviderAuthFailoverError(err)) {
-          recordRateLimitHit(route.modelDbId);
-          // Learn a provider-reported ceiling (e.g. a 413 TPM limit) so the next
-          // request's pre-check fails over before the 413. Mirrors the chat path.
-          learnLimitFromError(route.modelDbId, err);
-        }
+        recordRateLimitHit(route.modelDbId);
+        // Learn a provider-reported ceiling (e.g. a 413 TPM limit) so the next
+        // request's pre-check fails over before the 413. Mirrors the chat path.
+        learnLimitFromError(route.modelDbId, err);
         lastError = err;
         continue;
       }
@@ -849,13 +783,11 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // streamStarted) — close the SSE stream with a failed event instead of
   // writing JSON onto a committed event-stream response.
   const exhaustedMsg = `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${lastError?.message}`;
-  logRouteDecision(brokerContext, null, { status: 'error', fallbackAttempts: MAX_RETRIES, reason: exhaustedMsg });
   if (streamStarted) {
     sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message: exhaustedMsg, type: 'rate_limit_error' } } });
     res.end();
     return;
   }
-  applyBrokerHeaders(res, brokerContext);
   res.status(429).json({
     error: { message: exhaustedMsg, type: 'rate_limit_error' },
   });

@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { initEncryptionKey } from '../lib/crypto.js';
-import { applyModelPricing } from './model-pricing.js';
-import { refreshModelIntentFlags } from '../services/model-intent.js';
+import { initEncryptionKey } from '../../lib/crypto.js';
+import { applyModelPricing } from '../model-pricing.js';
+import { refreshModelIntentFlags } from '../../services/model-intent.js';
 
-export function migrateDbSchema(db: Database.Database) {
+export function up(db: Database.Database): void {
   createTables(db);
   initEncryptionKey(db);
   seedModels(db);
@@ -51,6 +51,10 @@ export function migrateDbSchema(db: Database.Database) {
   migrateQuirksV1(db);
   ensureUnifiedKey(db);
   migrateProfilesInit(db);
+}
+
+export function down(_db: Database.Database): void {
+  throw new Error('Legacy baseline is irreversible - restore from backup');
 }
 
 function createTables(db: Database.Database) {

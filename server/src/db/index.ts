@@ -3,10 +3,10 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { migrateDbSchema } from './migrations.js';
-import { ensurePersistenceSchema } from './persistence-schema.js';
 import { resolveDefaultDbPath } from '../env.js';
-import { hasRemoteSecretsStore, scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import { runMigrationsSync } from './migrate/runner.js';
+import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
+import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 
 const DB_PATH = resolveDefaultDbPath();
 
@@ -14,16 +14,28 @@ let db: Database.Database;
 
 export function getDb(): Database.Database {
   if (!db) {
-    throw new Error('Database not initialized. Call initDb() first.');
+    throw new Error('Database not initialized. Call initDb() or connectDb() first.');
   }
   return db;
 }
 
-export function initDb(dbPath?: string): Database.Database {
-  const resolvedPath = dbPath ?? DB_PATH;
-  const isMemory = resolvedPath === ':memory:';
+export function getDefaultDbPath(): string {
+  return process.env.FREEAPI_DB_PATH?.trim() || DB_PATH;
+}
 
-  if (!isMemory) {
+export function connectDb(
+  dbPath?: string,
+  opts?: {
+    /** Create the parent directory if absent. Default: true. Set false in
+     *  environments that do not have a writable local filesystem. */
+    ensureDir?: boolean;
+  },
+): Database.Database {
+  const resolvedPath = dbPath ?? getDefaultDbPath();
+  const isMemory = resolvedPath === ':memory:';
+  const ensureDir = opts?.ensureDir ?? true;
+
+  if (!isMemory && ensureDir) {
     const dataDir = path.dirname(resolvedPath);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
@@ -33,16 +45,35 @@ export function initDb(dbPath?: string): Database.Database {
   db = new Database(resolvedPath);
   if (!isMemory) db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  console.log(`Database initialized at ${resolvedPath}`);
+  return db;
+}
 
-  migrateDbSchema(db);
-  ensurePersistenceSchema(db);
+export function initDb(
+  dbPath?: string,
+  opts?: { ensureDir?: boolean },
+): Database.Database {
+  const db = connectDb(dbPath, opts);
 
-  if (hasRemoteSecretsStore()) {
-    scheduleHydrateSecretsToRemote(db);
-    console.log('[db] Mirrored secret state to remote Postgres/Neon.');
+  if (process.env.NODE_ENV !== 'development') {
+    runMigrationsSync(db, 'up');
+  } else {
+    // In dev, verify the DB has been initialised. If not, give a clear error.
+    const ready = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'"
+    ).get();
+    if (!ready) {
+      console.error(
+        '\n  [dev] Database not initialised. Run:\n\n' +
+        '    npm run db:migration:up\n\n' +
+        '  Then restart the server.\n'
+      );
+      process.exit(1);
+    }
   }
 
-  console.log(`Database initialized at ${resolvedPath}`);
+  if (!isEncryptionKeyInitialized()) initEncryptionKey(db);
+
   return db;
 }
 
