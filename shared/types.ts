@@ -121,6 +121,16 @@ export interface ApiKeyModel {
   family?: string | null;
 }
 
+export interface ApiKeyActivity {
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  lastRoutedAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastErrorMessage: string | null;
+}
+
 export interface ApiKey {
   id: number;
   platform: Platform;
@@ -135,6 +145,7 @@ export interface ApiKey {
   enabled: boolean;
   createdAt: string;
   lastCheckedAt: string | null;
+  activity: ApiKeyActivity;
   models?: ApiKeyModel[];
 }
 
@@ -151,13 +162,20 @@ export interface ApiKeyCreate {
 // ---- Fallback Config ----
 
 export interface FallbackEntry {
-  modelId: number;
+  modelDbId: number;
   platform: Platform;
+  modelId: string;
   displayName: string;
   intelligenceRank: number;
   speedRank: number;
+  sizeLabel: string;
   priority: number;
   enabled: boolean;
+  contextWindow?: number | null;
+  keyCount?: number;
+  healthyKeyCount?: number;
+  catalogStatus?: string | null;
+  routable?: boolean;
   // Present when model unification is enabled — identifies the logical model
   // this provider row belongs to so the dashboard can render grouped rows.
   groupKey?: string;

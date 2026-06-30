@@ -37,6 +37,7 @@ describe('Keys API', () => {
 
   beforeEach(() => {
     const db = getDb();
+    db.prepare('DELETE FROM requests').run();
     db.prepare('DELETE FROM api_keys').run();
   });
 
@@ -176,5 +177,33 @@ describe('Keys API', () => {
   it('PATCH /api/keys/:id returns 404 for nonexistent key', async () => {
     const { status } = await request(app, 'PATCH', '/api/keys/99999', { label: 'test' });
     expect(status).toBe(404);
+  });
+
+  it('GET /api/keys includes derived activity for each key', async () => {
+    const { body: created } = await request(app, 'POST', '/api/keys', {
+      platform: 'groq',
+      key: 'gsk_test123456789',
+      label: 'Activity key',
+    });
+
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO requests (platform, model_id, key_id, status, latency_ms, error, created_at)
+      VALUES
+      ('groq', 'llama-test', ?, 'success', 111, NULL, '2026-06-30 06:10:00'),
+      ('groq', 'llama-test', ?, 'error', 222, 'boom', '2026-06-30 06:12:00')
+    `).run(created.id, created.id);
+
+    const { status, body } = await request(app, 'GET', '/api/keys');
+    expect(status).toBe(200);
+    expect(body[0].activity).toMatchObject({
+      requestCount: 2,
+      successCount: 1,
+      errorCount: 1,
+      lastRoutedAt: '2026-06-30 06:12:00',
+      lastSuccessAt: '2026-06-30 06:10:00',
+      lastErrorAt: '2026-06-30 06:12:00',
+      lastErrorMessage: 'boom',
+    });
   });
 });

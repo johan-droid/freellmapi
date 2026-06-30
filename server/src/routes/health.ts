@@ -5,6 +5,8 @@ import { checkKeyHealth, checkAllKeys } from '../services/health.js';
 import { hasProvider } from '../providers/index.js';
 import { getQuotaStateForKeys } from '../services/provider-quota.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import { getActiveChain, canRouteEntryNow } from '../services/router.js';
+import { getKeyActivitySummaryMap } from '../services/key-activity.js';
 
 export const healthRouter = Router();
 
@@ -31,28 +33,22 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     FROM api_keys
     ORDER BY platform, created_at DESC
   `).all() as any[];
+  const activityByKeyId = getKeyActivitySummaryMap(db);
 
-  const routingOverview = db.prepare(`
+  const routingTotals = db.prepare(`
     SELECT
       COUNT(*) as total_models,
       SUM(CASE WHEN m.enabled = 1 THEN 1 ELSE 0 END) as enabled_models,
-      SUM(CASE WHEN fc.enabled = 1 THEN 1 ELSE 0 END) as chain_enabled_models,
       SUM(CASE WHEN (pcm.status IS NULL OR pcm.status IN ('active', 'candidate')) THEN 1 ELSE 0 END) as catalog_live_models,
-      SUM(CASE WHEN fc.enabled = 1
-                AND m.enabled = 1
-                AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
-                AND EXISTS (
-                  SELECT 1
-                  FROM api_keys ak
-                  WHERE ak.platform = m.platform
-                    AND ak.enabled = 1
-                )
-          THEN 1 ELSE 0 END) as routable_models
+      SUM(CASE WHEN fc.enabled = 1 THEN 1 ELSE 0 END) as fallback_enabled_models
     FROM models m
     LEFT JOIN fallback_config fc ON fc.model_db_id = m.id
     LEFT JOIN provider_catalog_models pcm
       ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
   `).get() as any;
+  const activeChain = getActiveChain(db);
+  const chainEnabledModels = activeChain.filter((entry) => entry.enabled).length;
+  const routableModels = activeChain.filter((entry) => canRouteEntryNow(entry)).length;
 
   const downtimeOverview = db.prepare(`
     SELECT
@@ -83,14 +79,26 @@ healthRouter.get('/', (_req: Request, res: Response) => {
       enabled: k.enabled === 1,
       createdAt: k.created_at,
       lastCheckedAt: k.last_checked_at,
+      activity: (() => {
+        const activity = activityByKeyId.get(k.id);
+        return {
+          requestCount: activity?.requestCount ?? 0,
+          successCount: activity?.successCount ?? 0,
+          errorCount: activity?.errorCount ?? 0,
+          lastRoutedAt: activity?.lastRoutedAt ?? null,
+          lastSuccessAt: activity?.lastSuccessAt ?? null,
+          lastErrorAt: activity?.lastErrorAt ?? null,
+          lastErrorMessage: activity?.lastErrorMessage ?? null,
+        };
+      })(),
     })),
     quotaStates: getQuotaStateForKeys(),
     routingOverview: {
-      totalModels: routingOverview.total_models ?? 0,
-      enabledModels: routingOverview.enabled_models ?? 0,
-      chainEnabledModels: routingOverview.chain_enabled_models ?? 0,
-      catalogLiveModels: routingOverview.catalog_live_models ?? 0,
-      routableModels: routingOverview.routable_models ?? 0,
+      totalModels: routingTotals.total_models ?? 0,
+      enabledModels: routingTotals.enabled_models ?? 0,
+      chainEnabledModels,
+      catalogLiveModels: routingTotals.catalog_live_models ?? 0,
+      routableModels,
     },
     downtimeOverview: {
       probeRows24h: downtimeOverview.probe_rows_24h ?? 0,

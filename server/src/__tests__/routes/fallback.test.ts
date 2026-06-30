@@ -61,6 +61,32 @@ describe('Fallback API', () => {
     // contextWindow powers the dashboard catalog filter (#343); present even when
     // the catalog has no value for a model (null).
     expect(first).toHaveProperty('contextWindow');
+    expect(first).toHaveProperty('healthyKeyCount');
+    expect(first).toHaveProperty('catalogStatus');
+    expect(first).toHaveProperty('routable');
+  });
+
+  it('GET /api/fallback marks models with only errored keys as not routable', async () => {
+    const db = getDb();
+    const target = db.prepare(`
+      SELECT id, platform
+      FROM models
+      WHERE platform = 'groq' AND key_id IS NULL
+      ORDER BY id
+      LIMIT 1
+    `).get() as { id: number; platform: string };
+    const secret = encrypt('fallback-routable-test-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, 'errored', ?, ?, ?, 'error', 1)
+    `).run(target.platform, secret.encrypted, secret.iv, secret.authTag);
+
+    const { body } = await request(app, 'GET', '/api/fallback');
+    const row = body.find((entry: any) => entry.modelDbId === target.id);
+    expect(row).toBeDefined();
+    expect(row.keyCount).toBeGreaterThan(0);
+    expect(row.healthyKeyCount).toBe(0);
+    expect(row.routable).toBe(false);
   });
 
   // Regression: GET /routing must always carry customWeights, even before the
@@ -256,5 +282,41 @@ describe('Fallback API', () => {
   it('POST /api/fallback/sort/invalid returns 400', async () => {
     const { status } = await request(app, 'POST', '/api/fallback/sort/invalid');
     expect(status).toBe(400);
+  });
+
+  it('GET /api/fallback follows the active profile chain instead of the global fallback table', async () => {
+    const db = getDb();
+    const firstTwo = db.prepare(`
+      SELECT id
+      FROM models
+      WHERE enabled = 1
+      ORDER BY id
+      LIMIT 2
+    `).all() as Array<{ id: number }>;
+    expect(firstTwo).toHaveLength(2);
+
+    const profileId = Number(db.prepare(`
+      INSERT INTO profiles (name, type, sort_order)
+      VALUES ('Routing Profile', 'custom', 999)
+    `).run().lastInsertRowid);
+    db.prepare(`
+      INSERT INTO profile_models (profile_id, model_db_id, priority, enabled)
+      VALUES (?, ?, 1, 1)
+    `).run(profileId, firstTwo[1].id);
+    db.prepare(`
+      INSERT INTO settings (key, value) VALUES ('active_profile_id', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(String(profileId));
+
+    try {
+      const { status, body } = await request(app, 'GET', '/api/fallback');
+      expect(status).toBe(200);
+      expect(body).toHaveLength(1);
+      expect(body[0].modelDbId).toBe(firstTwo[1].id);
+    } finally {
+      db.prepare("DELETE FROM settings WHERE key = 'active_profile_id'").run();
+      db.prepare('DELETE FROM profile_models WHERE profile_id = ?').run(profileId);
+      db.prepare('DELETE FROM profiles WHERE id = ?').run(profileId);
+    }
   });
 });

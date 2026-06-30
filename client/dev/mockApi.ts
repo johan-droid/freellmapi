@@ -105,7 +105,7 @@ export function mockApiPlugin(): Plugin {
             rpmLimit: m.rpmLimit, rpdLimit: m.rpdLimit, monthlyTokenBudget: m.monthlyTokenBudget,
             supportsVision: m.supportsVision, supportsTools: m.supportsTools,
             codingBias: m.codingBias, researchBias: m.researchBias, chatBias: m.chatBias,
-            keyCount: 3,
+            keyCount: 3, healthyKeyCount: 3, catalogStatus: 'active', routable: m.enabled,
           }))
           return send(rows)
         }

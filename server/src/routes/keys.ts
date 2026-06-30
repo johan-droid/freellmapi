@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 import { resolveProvider } from '../providers/index.js';
 import { encrypt, decrypt, maskKey } from '../lib/crypto.js';
+import { getKeyActivitySummaryMap } from '../services/key-activity.js';
 
 export const keysRouter = Router();
 
@@ -65,6 +66,7 @@ const updateKeySchema = z.object({
 keysRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM api_keys ORDER BY created_at DESC').all() as any[];
+  const activityByKeyId = getKeyActivitySummaryMap(db);
 
   const customModels = [
     ...db.prepare(`
@@ -113,6 +115,16 @@ keysRouter.get('/', (_req: Request, res: Response) => {
     } catch {
       maskedKey = '[decrypt failed]';
     }
+    const activity = activityByKeyId.get(row.id) ?? {
+      keyId: row.id,
+      requestCount: 0,
+      successCount: 0,
+      errorCount: 0,
+      lastRoutedAt: null,
+      lastSuccessAt: null,
+      lastErrorAt: null,
+      lastErrorMessage: null,
+    };
     return {
       id: row.id,
       platform: row.platform,
@@ -127,8 +139,24 @@ keysRouter.get('/', (_req: Request, res: Response) => {
       enabled: row.enabled === 1,
       createdAt: row.created_at,
       lastCheckedAt: row.last_checked_at,
+      activity: {
+        requestCount: activity.requestCount,
+        successCount: activity.successCount,
+        errorCount: activity.errorCount,
+        lastRoutedAt: activity.lastRoutedAt,
+        lastSuccessAt: activity.lastSuccessAt,
+        lastErrorAt: activity.lastErrorAt,
+        lastErrorMessage: activity.lastErrorMessage,
+      },
       models: row.platform === 'custom' ? (modelsByKeyId.get(row.id) ?? []) : undefined,
     };
+  });
+
+  keys.sort((a, b) => {
+    const aLast = a.activity.lastRoutedAt ?? a.lastCheckedAt ?? a.createdAt;
+    const bLast = b.activity.lastRoutedAt ?? b.lastCheckedAt ?? b.createdAt;
+    if (aLast !== bLast) return String(bLast).localeCompare(String(aLast));
+    return b.id - a.id;
   });
 
   res.json(keys);

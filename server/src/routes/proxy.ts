@@ -3,7 +3,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { ChatMessage, ChatToolCall, ModelListRow } from '@freellmapi/shared/types.js';
-import { routeRequest, resolveRoutingChain, resolveModelGroupCandidates, recordRateLimitHit, recordSuccess, hasEnabledVisionModel, hasEnabledToolsModel, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
+import { routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolvePinnedModelChain, recordRateLimitHit, recordSuccess, hasEnabledVisionModel, hasEnabledToolsModel, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS, MODEL_FORBIDDEN_COOLDOWN_MS, learnLimitFromError } from '../services/ratelimit.js';
 import { runEmbeddings, EmbeddingsError } from '../services/embeddings.js';
 import { runImageGeneration, runSpeech, MediaError } from '../services/media.js';
@@ -120,6 +120,33 @@ export function traceRouteEvent(
   if (opts.outputTokens != null) parts.push(`out=${opts.outputTokens}`);
   if (opts.error) parts.push(`err=${JSON.stringify(opts.error)}`);
   console.log(parts.join(' '));
+}
+
+function routeLabel(route: Pick<RouteResult, 'platform' | 'modelId'>): string {
+  return `${route.platform}/${route.modelId}`;
+}
+
+export function buildFallbackMeta(attemptedRoutes: string[]) {
+  return {
+    fallbackAttempts: Math.max(0, attemptedRoutes.length - 1),
+    attemptedRoutes,
+    lastRoutedVia: attemptedRoutes.at(-1) ?? null,
+  };
+}
+
+export function applyRouteHeaders(res: Response, route: Pick<RouteResult, 'platform' | 'modelId'>, attempt: number) {
+  res.setHeader('X-Routed-Via', routeLabel(route));
+  if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+}
+
+export function applyFallbackErrorHeaders(res: Response, attemptedRoutes: string[]) {
+  const meta = buildFallbackMeta(attemptedRoutes);
+  if (meta.fallbackAttempts > 0) {
+    res.setHeader('X-Fallback-Attempts', String(meta.fallbackAttempts));
+  }
+  if (meta.lastRoutedVia) {
+    res.setHeader('X-Routed-Via', meta.lastRoutedVia);
+  }
 }
 
 // Sticky sessions: track which model served each "session"
@@ -669,6 +696,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
     } else {
       const enabled = db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel) as { id: number } | undefined;
       if (enabled) {
+        groupChain = resolvePinnedModelChain(enabled.id);
         preferredModel = enabled.id;
       } else {
         const disabled = db.prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel) as { id: number } | undefined;
@@ -688,6 +716,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
   const pinnedModelId = requestedModel && !isAutoModel(requestedModel) ? requestedModel : null;
   const skipKeys = new Set<string>();
   const skipModels = new Set<number>();
+  const attemptedRoutes: string[] = [];
   let lastError: any = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -704,11 +733,14 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
       );
     } catch (err: any) {
       if (lastError) {
+        const meta = buildFallbackMeta(attemptedRoutes);
+        applyFallbackErrorHeaders(res, attemptedRoutes);
         res.status(429).json({
           error: {
             message: `All models rate-limited. Last error: ${sanitizeProviderErrorMessage(lastError.message)}`,
             type: 'rate_limit_error',
           },
+          ...meta,
         });
       } else {
         const disposition: string[] = Array.isArray(err.diagnostics) ? err.diagnostics : [];
@@ -732,6 +764,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
       model: route.modelId,
       requestedModel: attempt === 0 ? requestedModelLabel : undefined,
     });
+    attemptedRoutes.push(routeLabel(route));
 
     try {
       if (stream) {
@@ -747,8 +780,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');
           res.setHeader('Connection', 'keep-alive');
-          res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-          if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+          applyRouteHeaders(res, route, attempt);
           headerSent = true;
           for (const frame of buffered) res.write(`data: ${JSON.stringify(frame)}\n\n`);
           buffered.length = 0;
@@ -838,8 +870,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
         recordTokens(route.platform, route.modelId, route.keyId, totalTokens);
         recordSuccess(route.modelDbId);
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyRouteHeaders(res, route, attempt);
         res.json({
           id: completionIdFromChat(result.id),
           object: 'text_completion',
@@ -903,21 +934,27 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
         continue;
       }
 
+      const meta = buildFallbackMeta(attemptedRoutes);
+      applyFallbackErrorHeaders(res, attemptedRoutes);
       res.status(502).json({
         error: {
           message: `Provider error (${route.displayName}): ${safeError}`,
           type: 'provider_error',
         },
+        ...meta,
       });
       return;
     }
   }
 
+  const meta = buildFallbackMeta(attemptedRoutes);
+  applyFallbackErrorHeaders(res, attemptedRoutes);
   res.status(429).json({
     error: {
       message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,
       type: 'rate_limit_error',
     },
+    ...meta,
   });
 });
 
@@ -1286,6 +1323,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       // Unify OFF, or an id that isn't in the catalog: legacy single-row pin.
       const enabled = db.prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel) as { id: number } | undefined;
       if (enabled) {
+        groupChain = resolvePinnedModelChain(enabled.id);
+        stickyStrategyKey = requestedModel;
         preferredModel = enabled.id;
       } else {
         const disabled = db.prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel) as { id: number } | undefined;
@@ -1312,6 +1351,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // Retry loop: on 429/rate limit, skip that model+key and try the next one
   const skipKeys = new Set<string>();
   const skipModels = new Set<number>();
+  const attemptedRoutes: string[] = [];
   let lastError: any = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -1329,11 +1369,14 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       // No more models available
       if (lastError) {
         const safeLastError = sanitizeProviderErrorMessage(lastError.message);
+        const meta = buildFallbackMeta(attemptedRoutes);
+        applyFallbackErrorHeaders(res, attemptedRoutes);
         res.status(429).json({
           error: {
             message: `All models rate-limited. Last error: ${safeLastError}`,
             type: 'rate_limit_error',
           },
+          ...meta,
         });
       } else {
         // Synchronous exhaustion: the router rejected every candidate before any
@@ -1362,6 +1405,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       model: route.modelId,
       requestedModel: attempt === 0 ? requestedModelLabel : undefined,
     });
+    attemptedRoutes.push(routeLabel(route));
     let outboundMessages = messages;
     // Extra input tokens the injected handoff adds on this turn (0 when not
     // injected). Folded into the streaming success accounting, where token
@@ -1414,8 +1458,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');
           res.setHeader('Connection', 'keep-alive');
-          res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-          if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+          applyRouteHeaders(res, route, attempt);
           headerSent = true;
           for (const p of preamble) res.write(`data: ${JSON.stringify(p)}\n\n`);
           preamble.length = 0;
@@ -1693,8 +1736,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         setStickyModel(messages, route.modelDbId, sessionIdHeader, stickyStrategyKey);
         if (handoffMode !== 'off' && sessionKey) recordSuccessfulModel({ sessionKey, modelKey });
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyRouteHeaders(res, route, attempt);
         // Repair double-encoded tool arguments against the request's tool
         // schemas (e.g. GLM emitting an array parameter as a JSON string),
         // so strict clients don't reject the call. Schema-gated — a true
@@ -1777,22 +1819,28 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       }
 
       // Non-retryable error (auth, 4xx, etc.): don't retry
+      const meta = buildFallbackMeta(attemptedRoutes);
+      applyFallbackErrorHeaders(res, attemptedRoutes);
       res.status(502).json({
         error: {
           message: `Provider error (${route.displayName}): ${safeError}`,
           type: 'provider_error',
         },
+        ...meta,
       });
       return;
     }
   }
 
   // Exhausted all retries
+  const meta = buildFallbackMeta(attemptedRoutes);
+  applyFallbackErrorHeaders(res, attemptedRoutes);
   res.status(429).json({
     error: {
       message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,
       type: 'rate_limit_error',
     },
+    ...meta,
   });
 });
 

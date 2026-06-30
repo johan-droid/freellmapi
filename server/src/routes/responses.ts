@@ -9,9 +9,9 @@ import type {
   ChatToolChoice,
   Platform,
 } from '@freellmapi/shared/types.js';
-import { routeRequest, recordRateLimitHit, recordSuccess, hasEnabledToolsModel, type RouteResult } from '../services/router.js';
-import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS, learnLimitFromError } from '../services/ratelimit.js';
-import { getUnifiedApiKey } from '../db/index.js';
+import { routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolvePinnedModelChain, recordRateLimitHit, recordSuccess, hasEnabledToolsModel, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
+import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS, MODEL_FORBIDDEN_COOLDOWN_MS, learnLimitFromError } from '../services/ratelimit.js';
+import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { rescueInlineToolCalls, startsWithDialectMarker, couldBecomeDialectMarker, containsDialectMarker } from '../lib/tool-call-rescue.js';
@@ -27,9 +27,13 @@ import {
   setStickyModel,
   traceRouteEvent,
   logRequest,
+  buildFallbackMeta,
+  applyRouteHeaders,
+  applyFallbackErrorHeaders,
 } from './proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
+import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
 
 export const responsesRouter = Router();
 
@@ -50,6 +54,12 @@ export const responsesRouter = Router();
 // ─────────────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 20;
+
+function isAutoModel(modelId: string | undefined): boolean {
+  if (!modelId) return true;
+  const lower = modelId.toLowerCase();
+  return lower === 'auto' || lower.startsWith('auto:');
+}
 
 function newId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(18).toString('hex')}`;
@@ -344,8 +354,8 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   // Optional client-managed session affinity (mirrors /chat/completions).
   const rawSessionId = req.headers['x-session-id'];
   const sessionIdHeader = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
-  const preferredModel = getStickyModel(messages, sessionIdHeader);
-  const requestedModelLabel = reqData.model ?? 'auto';
+  const requestedModel = reqData.model;
+  const requestedModelLabel = requestedModel ?? 'auto';
 
   // Tool-bearing requests (the normal case for Codex/agent clients on this
   // endpoint) must stay on models that emit structured tool_calls. Make the
@@ -365,8 +375,60 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   }
 
   const responseId = newId('resp');
+  let resolvedChain: ResolvedChain | undefined;
+  let strategyKey: string | undefined;
+  if (isAutoModel(requestedModel)) {
+    resolvedChain = resolveRoutingChain(requestedModel);
+    strategyKey = resolvedChain.strategyKey;
+  }
+
+  let preferredModel: number | undefined;
+  let groupChain: ChainRow[] | undefined;
+  let stickyStrategyKey: string | undefined = strategyKey;
+  if (isAutoModel(requestedModel)) {
+    preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
+  } else if (requestedModel) {
+    const members = isUnifyEnabled() ? resolveRequestedIdToMembers(requestedModel, getModelGroups()) : null;
+    if (members && members.length > 0) {
+      groupChain = resolveModelGroupCandidates(members);
+      if (groupChain.length === 0) {
+        res.status(400).json({
+          error: {
+            message: `Model '${requestedModel}' has no providers with an enabled key. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
+            type: 'invalid_request_error',
+            code: 'model_not_found',
+          },
+        });
+        return;
+      }
+      stickyStrategyKey = requestedModel;
+      const sticky = getStickyModel(messages, sessionIdHeader, stickyStrategyKey);
+      preferredModel = (sticky != null && groupChain.some((row) => row.model_db_id === sticky)) ? sticky : undefined;
+    } else {
+      const enabled = getDb().prepare('SELECT id FROM models WHERE model_id = ? AND enabled = 1').get(requestedModel) as { id: number } | undefined;
+      if (!enabled) {
+        const disabled = getDb().prepare('SELECT id FROM models WHERE model_id = ?').get(requestedModel) as { id: number } | undefined;
+        const reason = disabled ? 'is disabled' : 'is not in the catalog';
+        res.status(400).json({
+          error: {
+            message: `Model '${requestedModel}' ${reason}. Use 'auto' (or omit the 'model' field) to auto-route, or call /v1/models for the available list.`,
+            type: 'invalid_request_error',
+            code: 'model_not_found',
+          },
+        });
+        return;
+      }
+      groupChain = resolvePinnedModelChain(enabled.id);
+      stickyStrategyKey = requestedModel;
+      preferredModel = enabled.id;
+    }
+  } else {
+    preferredModel = getStickyModel(messages, sessionIdHeader, strategyKey);
+  }
+
   const skipKeys = new Set<string>();
   const skipModels = new Set<number>();
+  const attemptedRoutes: string[] = [];
   let lastError: any = null;
 
   // Stream bookkeeping (used only when stream === true).
@@ -380,7 +442,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let route: RouteResult;
     try {
-      route = routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, false, wantsTools, skipModels.size > 0 ? skipModels : undefined);
+      route = routeRequest(estimatedTotal, skipKeys.size > 0 ? skipKeys : undefined, preferredModel, false, wantsTools, skipModels.size > 0 ? skipModels : undefined, groupChain ?? resolvedChain?.chain);
     } catch (err: any) {
       const status = lastError ? 429 : (err.status ?? 503);
       const message = lastError
@@ -391,7 +453,9 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         sse('response.failed', { response: { id: responseId, object: 'response', status: 'failed', error: { message, type } } });
         res.end();
       } else {
-        res.status(status).json({ error: { message, type } });
+        const meta = buildFallbackMeta(attemptedRoutes);
+        applyFallbackErrorHeaders(res, attemptedRoutes);
+        res.status(status).json({ error: { message, type }, ...meta });
       }
       return;
     }
@@ -405,6 +469,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         model: route.modelId,
         requestedModel: attempt === 0 ? requestedModelLabel : undefined,
       });
+      attemptedRoutes.push(`${route.platform}/${route.modelId}`);
       if (stream) {
         let outputIndex = 0;
         let msgItemId: string | null = null;
@@ -469,8 +534,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-            if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+            applyRouteHeaders(res, route, attempt);
             const skeleton = {
               id: responseId, object: 'response', created_at: nowUnix(),
               status: 'in_progress', model: route.modelId, output: [], output_text: '',
@@ -644,7 +708,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordRequest(route.platform, route.modelId, route.keyId);
         recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
         recordSuccess(route.modelDbId);
-        setStickyModel(messages, route.modelDbId, sessionIdHeader);
+        setStickyModel(messages, route.modelDbId, sessionIdHeader, stickyStrategyKey);
         traceRouteEvent('Responses', {
           event: 'ok',
           requestId: requestGroupId,
@@ -714,10 +778,9 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         recordRequest(route.platform, route.modelId, route.keyId);
         recordTokens(route.platform, route.modelId, route.keyId, result.usage?.total_tokens ?? 0);
         recordSuccess(route.modelDbId);
-        setStickyModel(messages, route.modelDbId, sessionIdHeader);
+        setStickyModel(messages, route.modelDbId, sessionIdHeader, stickyStrategyKey);
 
-        res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
-        if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
+        applyRouteHeaders(res, route, attempt);
         res.json(buildResponseObject({
           id: responseId, model: route.modelId, text, toolCalls,
           promptTokens, completionTokens,
@@ -764,7 +827,9 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
         setCooldown(route.platform, route.modelId, route.keyId, isPaymentRequiredError(err)
           ? PAYMENT_REQUIRED_COOLDOWN_MS
-          : getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
+          : isModelAccessForbiddenError(err)
+            ? MODEL_FORBIDDEN_COOLDOWN_MS
+            : getCooldownDurationForLimit(route.platform, route.modelId, route.keyId, { rpd: route.rpdLimit, tpd: route.tpdLimit }));
         recordRateLimitHit(route.modelDbId);
         // Learn a provider-reported ceiling (e.g. a 413 TPM limit) so the next
         // request's pre-check fails over before the 413. Mirrors the chat path.
@@ -773,7 +838,9 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         continue;
       }
 
-      res.status(502).json({ error: { message: `Provider error (${route.displayName}): ${safeError}`, type: 'provider_error' } });
+      const meta = buildFallbackMeta(attemptedRoutes);
+      applyFallbackErrorHeaders(res, attemptedRoutes);
+      res.status(502).json({ error: { message: `Provider error (${route.displayName}): ${safeError}`, type: 'provider_error' }, ...meta });
       return;
     }
   }
@@ -788,7 +855,10 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
     res.end();
     return;
   }
+  const meta = buildFallbackMeta(attemptedRoutes);
+  applyFallbackErrorHeaders(res, attemptedRoutes);
   res.status(429).json({
     error: { message: exhaustedMsg, type: 'rate_limit_error' },
+    ...meta,
   });
 });

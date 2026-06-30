@@ -15,12 +15,15 @@ interface FallbackEntry {
   modelDbId: number
   priority: number
   enabled: boolean
+  routable?: boolean
   platform: string
   modelId: string
   displayName: string
   sizeLabel: string
   intelligenceRank: number
   keyCount: number
+  healthyKeyCount?: number
+  catalogStatus?: string | null
 }
 
 interface ChatMessage {
@@ -148,10 +151,19 @@ export default function PlaygroundPage() {
   // always collapses a model's providers into one option.
   const unifyOn = true
 
-  const availableModels = fallbackEntries.filter(e => e.keyCount > 0 && e.enabled)
+  const availableModels = fallbackEntries.filter(e => (e.routable ?? (e.keyCount > 0 && e.enabled)))
   // Collapse the same model from multiple providers into one option (value =
   // canonical id, which the proxy resolves to the whole group).
   const modelOptions = buildModelOptions(availableModels, unifyOn)
+
+  useEffect(() => {
+    if (selectedModel === 'auto' || selectedModel === 'fusion') return
+    const stillAvailable = modelOptions.some(option => option.value === selectedModel)
+    if (!stillAvailable) {
+      setSelectedModel('auto')
+      localStorage.setItem('playground.model', 'auto')
+    }
+  }, [modelOptions, selectedModel])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

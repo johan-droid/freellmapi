@@ -38,6 +38,8 @@ interface KeyRow {
   status: string;
   enabled: number;
   base_url: string | null;
+  last_routed_at?: string | null;
+  last_success_at?: string | null;
 }
 
 // Chain row joined with the model fields the bandit needs to score it.
@@ -537,10 +539,16 @@ const GLOBAL_SORT_ALIASES: Record<string, string> = {
 const CATALOG_ROUTABLE_STATUSES = ['active', 'candidate'] as const;
 const CATALOG_ROUTABLE_STATUS_SQL = CATALOG_ROUTABLE_STATUSES.map(status => `'${status}'`).join(', ');
 
-function getActiveChain(db: Database): ChainRow[] {
+export function getActiveProfileId(db: Database): number | null {
   const activeProfileSetting = db.prepare("SELECT value FROM settings WHERE key = 'active_profile_id'").get() as { value: string } | undefined;
-  if (activeProfileSetting) {
-    const profileId = parseInt(activeProfileSetting.value, 10);
+  if (!activeProfileSetting) return null;
+  const profileId = parseInt(activeProfileSetting.value, 10);
+  return Number.isInteger(profileId) ? profileId : null;
+}
+
+export function getActiveChain(db: Database): ChainRow[] {
+  const profileId = getActiveProfileId(db);
+  if (profileId != null) {
     const chain = db.prepare(`
       SELECT pm.model_db_id, pm.priority, pm.enabled,
              m.platform, m.model_id, m.display_name, m.intelligence_rank,
@@ -552,6 +560,7 @@ function getActiveChain(db: Database): ChainRow[] {
       LEFT JOIN provider_catalog_models pcm
         ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
       WHERE pm.profile_id = ?
+        AND pm.enabled = 1
         AND (pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL}))
       ORDER BY pm.priority ASC
     `).all(profileId) as ChainRow[];
@@ -589,6 +598,7 @@ function getChainByProfileName(db: Database, name: string): ChainRow[] | null {
     LEFT JOIN provider_catalog_models pcm
       ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
     WHERE pm.profile_id = ?
+      AND pm.enabled = 1
       AND (pcm.status IS NULL OR pcm.status IN (${CATALOG_ROUTABLE_STATUS_SQL}))
     ORDER BY pm.priority ASC
   `).all(profile.id) as ChainRow[];
@@ -676,7 +686,7 @@ export function resolveRoutingChain(modelString: string | undefined): ResolvedCh
  * context window) stay in the caller; this only does key selection + accounting
  * pre-checks.
  */
-function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[]): RouteResult | null {
+function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[], advanceRoundRobin = true): RouteResult | null {
   const db = getDb();
   const label = `${entry.platform}/${entry.model_id}`;
 
@@ -686,14 +696,30 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   }
   const provider = getProvider(entry.platform as Platform)!;
   const keys = db.prepare(`
-    SELECT *
-    FROM api_keys
-    WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
+    SELECT
+      ak.*,
+      activity.last_routed_at,
+      activity.last_success_at
+    FROM api_keys ak
+    LEFT JOIN (
+      SELECT
+        key_id,
+        MAX(created_at) AS last_routed_at,
+        MAX(CASE WHEN status = 'success' THEN created_at END) AS last_success_at
+      FROM requests
+      WHERE key_id IS NOT NULL
+      GROUP BY key_id
+    ) activity ON activity.key_id = ak.id
+    WHERE ak.platform = ? AND ak.enabled = 1 AND ak.status IN ('healthy', 'unknown')
     ORDER BY
-      CASE WHEN status = 'healthy' THEN 0 ELSE 1 END,
-      CASE WHEN last_checked_at IS NULL THEN 1 ELSE 0 END,
-      last_checked_at DESC,
-      id ASC
+      CASE WHEN ak.status = 'healthy' THEN 0 ELSE 1 END,
+      CASE WHEN activity.last_success_at IS NULL THEN 1 ELSE 0 END,
+      activity.last_success_at DESC,
+      CASE WHEN activity.last_routed_at IS NULL THEN 1 ELSE 0 END,
+      activity.last_routed_at DESC,
+      CASE WHEN ak.last_checked_at IS NULL THEN 1 ELSE 0 END,
+      ak.last_checked_at DESC,
+      ak.id ASC
   `).all(entry.platform) as KeyRow[];
   if (keys.length === 0) {
     diag?.push(`${label}: no enabled+healthy key for platform`);
@@ -746,7 +772,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
       : provider;
     if (!resolvedProvider) { note('no-resolved-provider'); continue; }
 
-    roundRobinIndex.set(rrKey, idx);
+    if (advanceRoundRobin) roundRobinIndex.set(rrKey, idx);
     return {
       provider: resolvedProvider,
       modelId: entry.model_id,
@@ -762,7 +788,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
 
   // No usable key for this model. Advance the round-robin index anyway so we
   // don't get stuck re-trying the same exhausted key first next time.
-  roundRobinIndex.set(rrKey, idx);
+  if (advanceRoundRobin) roundRobinIndex.set(rrKey, idx);
   const summary = Object.entries(skipTally).map(([r, n]) => `${r}:${n}`).join(', ') || 'no usable key';
   diag?.push(`${label}: ${keys.length} key(s) — ${summary}`);
   return null;
@@ -781,6 +807,16 @@ function getModelChainRow(db: Database, modelDbId: number): ChainRow | undefined
     FROM models m
     WHERE m.id = ? AND m.enabled = 1
   `).get(modelDbId) as ChainRow | undefined;
+}
+
+export function resolvePinnedModelChain(modelDbId: number): ChainRow[] {
+  const db = getDb();
+  const row = getModelChainRow(db, modelDbId);
+  return row && row.enabled ? [row] : [];
+}
+
+export function canRouteEntryNow(entry: ChainRow, estimatedTokens = 1): boolean {
+  return selectKeyForModel(entry, estimatedTokens, undefined, undefined, false) !== null;
 }
 
 /**
@@ -967,7 +1003,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
   const strategy = getRoutingStrategy();
   if (strategy !== 'priority') refreshStatsCache(db);
 
-  const chain = prefetchedChain ?? getActiveChain(db).filter(e => e.enabled);
+  const chain = (prefetchedChain ?? getActiveChain(db)).filter(e => e.enabled);
 
   let sortedChain = orderChain(chain, strategy);
 
@@ -978,23 +1014,6 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
       if (idx > 0) {
         const [preferred] = sortedChain.splice(idx, 1);
         sortedChain.unshift(preferred);
-      }
-    } else {
-      // The requested model is not in the current routing chain (e.g. it's a
-      // custom model or not added to the active profile). We must fulfill the
-      // explicit request by injecting it at the front.
-      const pinnedRow = db.prepare(`
-        SELECT m.id as model_db_id, 0 as priority, 1 as enabled,
-               m.platform, m.model_id, m.display_name, m.intelligence_rank,
-               m.size_label, m.monthly_token_budget,
-               m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit, m.supports_vision,
-               m.supports_tools, m.context_window, m.key_id
-        FROM models m
-        WHERE m.id = ? AND m.enabled = 1
-      `).get(preferredModelDbId) as ChainRow | undefined;
-      
-      if (pinnedRow) {
-        sortedChain.unshift(pinnedRow);
       }
     }
   }
@@ -1012,6 +1031,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
 
   for (const entry of sortedChain) {
     const label = `${entry.platform}/${entry.model_id}`;
+    if (!entry.enabled) { diag.push(`${label}: disabled in active chain`); continue; }
     // Models the caller has ruled out for this request — e.g. a 404
     // "model removed upstream" already seen this request: trying the same
     // model again on a different key would just burn another attempt on the
@@ -1132,33 +1152,24 @@ export function getRoutingScores(): { strategy: RoutingStrategy; weights: Routin
 // Whether at least one vision-capable model is enabled in the fallback chain.
 // Used to give image requests a clear "enable a vision model" error instead of
 // the generic exhaustion message when none is configured (#118, #125).
-export function hasEnabledVisionModel(): boolean {
+function hasEnabledCapabilityModel(kind: 'vision' | 'tools'): boolean {
   const db = getDb();
-  const row = db.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM fallback_config fc
-    JOIN models m ON m.id = fc.model_db_id
-    LEFT JOIN provider_catalog_models pcm
-      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
-    WHERE fc.enabled = 1 AND m.enabled = 1 AND m.supports_vision = 1
-      AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
-  `).get() as { cnt: number };
-  return row.cnt > 0;
+  const chain = getActiveChain(db).filter(entry => entry.enabled);
+  for (const entry of chain) {
+    if (kind === 'vision' && !entry.supports_vision) continue;
+    if (kind === 'tools' && !entry.supports_tools) continue;
+    return true;
+  }
+  return false;
+}
+
+export function hasEnabledVisionModel(): boolean {
+  return hasEnabledCapabilityModel('vision');
 }
 
 // Whether at least one tool-capable model is enabled in the fallback chain.
 // Same role as hasEnabledVisionModel: a clear up-front error for tool-bearing
 // requests beats routing them to a model that mangles the tool call.
 export function hasEnabledToolsModel(): boolean {
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM fallback_config fc
-    JOIN models m ON m.id = fc.model_db_id
-    LEFT JOIN provider_catalog_models pcm
-      ON pcm.provider_slug = m.platform AND pcm.provider_model_id = m.model_id
-    WHERE fc.enabled = 1 AND m.enabled = 1 AND m.supports_tools = 1
-      AND (pcm.status IS NULL OR pcm.status IN ('active', 'candidate'))
-  `).get() as { cnt: number };
-  return row.cnt > 0;
+  return hasEnabledCapabilityModel('tools');
 }

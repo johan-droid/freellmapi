@@ -320,6 +320,29 @@ describe('Router', () => {
     expect(() => routeRequest(500000)).not.toThrow();
   });
 
+  it('does not re-inject a stale preferred model that is no longer in the active chain', () => {
+    const db = getDb();
+    const googleKey = encrypt('test-google-key');
+    db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('google', 'test', googleKey.encrypted, googleKey.iv, googleKey.authTag, 'healthy', 1);
+
+    const top = db.prepare(`
+      SELECT m.id
+      FROM models m
+      JOIN fallback_config fc ON fc.model_db_id = m.id
+      WHERE m.platform = 'google' AND m.enabled = 1 AND fc.enabled = 1
+      ORDER BY fc.priority ASC
+      LIMIT 2
+    `).all() as Array<{ id: number }>;
+    expect(top.length).toBeGreaterThanOrEqual(2);
+
+    db.prepare('UPDATE fallback_config SET enabled = 0 WHERE model_db_id = ?').run(top[0].id);
+    const result = routeRequest(1000, undefined, top[0].id);
+    expect(result.modelDbId).not.toBe(top[0].id);
+  });
+
   it('should skip keys that cannot be decrypted and use a valid fallback key', () => {
     const db = getDb();
 

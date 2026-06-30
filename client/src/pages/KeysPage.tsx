@@ -1035,11 +1035,19 @@ export default function KeysPage() {
                                     {k.baseUrl}
                                   </code>
                                 )}
+                                <span className="text-[11px] text-muted-foreground break-all">
+                                  {`req ${k.activity.requestCount} · ok ${k.activity.successCount} · err ${k.activity.errorCount}`}
+                                </span>
                               </>
                             )}
                             <span className="hidden text-xs text-muted-foreground sm:inline">{statusLabelKey[status] ? t(statusLabelKey[status]) : status}</span>
                             </div>
                             <div className="flex items-center gap-1 sm:ml-auto">
+                            {k.activity.lastRoutedAt && (
+                              <span className="text-[11px] text-muted-foreground tabular-nums">
+                                {`route ${formatSqliteUtcToLocalTime(k.activity.lastRoutedAt, { hour: '2-digit', minute: '2-digit' })}`}
+                              </span>
+                            )}
                             {lastChecked && (
                               <span className="text-[11px] text-muted-foreground tabular-nums">
                                 {formatSqliteUtcToLocalTime(lastChecked, { hour: '2-digit', minute: '2-digit' })}
