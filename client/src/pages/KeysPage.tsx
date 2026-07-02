@@ -7,9 +7,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PageHeader } from '@/components/page-header'
-import type { ApiKey, ApiKeyModel, Platform, ProviderQuotaState } from '../../../shared/types'
-import { ChevronDown, Pencil, ExternalLink, Globe, Trash2 } from 'lucide-react'
+import type { ApiKey, ApiKeyModel, ImportKey, ImportSelectedResponse, Platform, PreviewKey, PreviewResponse, ProviderQuotaState } from '../../../shared/types'
+import { ChevronDown, Pencil, ExternalLink, Globe, Trash2, Upload } from 'lucide-react'
 import { formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
 
@@ -366,6 +367,239 @@ function ProxySettingsSection() {
   )
 }
 
+interface ImportRow extends PreviewKey {
+  selected: boolean
+  platform: Platform | ''
+  visible: boolean
+}
+
+function ImportKeysSection() {
+  const { t } = useI18n()
+  const queryClient = useQueryClient()
+  const [files, setFiles] = useState<File[]>([])
+  const [rows, setRows] = useState<ImportRow[]>([])
+  const [skipped, setSkipped] = useState<string[]>([])
+  const [result, setResult] = useState<ImportSelectedResponse | null>(null)
+
+  const importablePlatforms = PLATFORMS.filter(p => !p.keyless)
+
+  function platformFromPreview(key: PreviewKey): Platform | '' {
+    return importablePlatforms.some(p => p.value === key.detectedPlatform)
+      ? key.detectedPlatform as Platform
+      : ''
+  }
+
+  const preview = useMutation({
+    mutationFn: async (nextFiles: File[]) => {
+      const formData = new FormData()
+      nextFiles.forEach(file => formData.append('files', file))
+      return apiFetch<PreviewResponse>('/api/keys/preview', { method: 'POST', body: formData })
+    },
+    onSuccess: (data) => {
+      setRows(data.keys.map(key => {
+        const detected = platformFromPreview(key)
+        return {
+          ...key,
+          platform: detected,
+          selected: detected !== '',
+          visible: false,
+        }
+      }))
+      setSkipped(data.skipped)
+      setResult(null)
+    },
+  })
+
+  const importSelected = useMutation({
+    mutationFn: (keys: ImportKey[]) =>
+      apiFetch<ImportSelectedResponse>('/api/keys/import-selected', {
+        method: 'POST',
+        body: JSON.stringify({ keys }),
+      }),
+    onSuccess: (data) => {
+      setResult(data)
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+    },
+  })
+
+  const selectedKeys: ImportKey[] = rows
+    .filter(row => row.selected && row.platform && row.keyValue.trim())
+    .map(row => ({
+      keyName: row.keyName,
+      keyValue: row.keyValue,
+      platform: row.platform,
+    }))
+
+  function updateRow(index: number, patch: Partial<ImportRow>) {
+    setRows(prev => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
+
+  function chooseFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(e.target.files ?? [])
+    setFiles(nextFiles)
+    setRows([])
+    setSkipped([])
+    setResult(null)
+    preview.reset()
+    importSelected.reset()
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">{t('keys.importKeys')}</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{t('keys.importKeysDescription')}</p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => preview.mutate(files)}
+          disabled={files.length === 0 || preview.isPending}
+        >
+          <Upload className="size-3.5" />
+          {preview.isPending ? t('keys.previewing') : t('keys.previewFiles')}
+        </Button>
+      </div>
+
+      <div className="rounded-3xl border bg-card p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[260px] flex-1 space-y-1.5">
+            <Label className="text-xs">{t('keys.importFiles')}</Label>
+            <Input
+              type="file"
+              multiple
+              accept=".env,.json,.jsonc,.md,.txt"
+              onChange={chooseFiles}
+              className="cursor-pointer text-xs file:mr-2"
+            />
+          </div>
+          {files.length > 0 && (
+            <span className="pb-1 text-xs text-muted-foreground">
+              {t('keys.importFileCount', { count: files.length })}
+            </span>
+          )}
+        </div>
+
+        {preview.isError && (
+          <p className="mt-3 text-xs text-destructive">{(preview.error as Error).message}</p>
+        )}
+
+        {rows.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-2xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">{t('keys.selected')}</TableHead>
+                  <TableHead>{t('keys.provider')}</TableHead>
+                  <TableHead>{t('keys.keyName')}</TableHead>
+                  <TableHead>{t('keys.keyValue')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row, index) => (
+                  <TableRow key={`${row.keyName}:${index}`}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={row.selected}
+                        onChange={() => updateRow(index, { selected: !row.selected })}
+                        className="size-4 accent-primary"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={row.platform}
+                        onValueChange={(value) => updateRow(index, { platform: value as Platform, selected: true })}
+                      >
+                        <SelectTrigger className="w-[190px]">
+                          <SelectValue placeholder={t('keys.chooseProvider')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {importablePlatforms.map(p => (
+                            <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={row.keyName}
+                        onChange={e => updateRow(index, { keyName: e.target.value })}
+                        className="w-[220px] font-mono text-xs"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex min-w-[280px] items-center gap-2">
+                        <Input
+                          type={row.visible ? 'text' : 'password'}
+                          value={row.keyValue}
+                          onChange={e => updateRow(index, { keyValue: e.target.value })}
+                          className="font-mono text-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => updateRow(index, { visible: !row.visible })}
+                        >
+                          {row.visible ? t('common.hide') : t('common.show')}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {rows.length === 0 && preview.isSuccess && (
+          <p className="mt-3 text-xs text-muted-foreground">{t('keys.noPreviewKeys')}</p>
+        )}
+
+        {skipped.length > 0 && (
+          <div className="mt-3 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{t('keys.skippedItems')}</span>
+            <span> {skipped.slice(0, 5).join(', ')}</span>
+            {skipped.length > 5 && <span> {t('keys.moreItems', { count: skipped.length - 5 })}</span>}
+          </div>
+        )}
+
+        {rows.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => importSelected.mutate(selectedKeys)}
+              disabled={selectedKeys.length === 0 || importSelected.isPending}
+            >
+              {importSelected.isPending
+                ? t('keys.importing')
+                : t('keys.importSelected', { count: selectedKeys.length })}
+            </Button>
+            {selectedKeys.length === 0 && (
+              <span className="text-xs text-muted-foreground">{t('keys.noImportSelection')}</span>
+            )}
+          </div>
+        )}
+
+        {importSelected.isError && (
+          <p className="mt-3 text-xs text-destructive">{(importSelected.error as Error).message}</p>
+        )}
+        {result && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t('keys.importResult', { imported: result.imported, failed: result.errors.length })}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
 // Split a free-text model field on commas / newlines into a clean id list,
 // dropping blanks and duplicates so one endpoint can take several models. (#281)
 function parseModelList(raw: string): string[] {
@@ -673,9 +907,10 @@ function AnthropicSection() {
   )
 }
 
-type KeysTab = 'providers' | 'apiKey' | 'anthropic'
+type KeysTab = 'providers' | 'quotaSignals' | 'apiKey' | 'anthropic'
 const KEYS_TABS: { id: KeysTab; labelKey: string }[] = [
   { id: 'providers', labelKey: 'keys.tabProviders' },
+  { id: 'quotaSignals', labelKey: 'keys.tabQuotaSignals' },
   { id: 'apiKey', labelKey: 'keys.tabApiKey' },
   { id: 'anthropic', labelKey: 'keys.tabAnthropic' },
 ]
@@ -690,6 +925,9 @@ export default function KeysPage() {
   const [label, setLabel] = useState('')
   const [editingKeyId, setEditingKeyId] = useState<number | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
+  // Server-supplied notice when a key is saved for a platform with no models in
+  // the current catalog tier yet (e.g. a newly added premium provider, #438).
+  const [addNotice, setAddNotice] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [confirmDeleteModelKey, setConfirmDeleteModelKey] = useState<string | null>(null)
   const [expandedKeyIds, setExpandedKeyIds] = useState<Set<number>>(new Set())
@@ -699,11 +937,13 @@ export default function KeysPage() {
   const { data: healthData } = useQuery<HealthData>({ queryKey: ['health'], queryFn: () => apiFetch('/api/health'), refetchInterval: 30000 })
 
   const addKey = useMutation({
-    mutationFn: (body: { platform: string; key: string; label?: string }) => apiFetch('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => {
+    mutationFn: (body: { platform: string; key: string; label?: string }) =>
+      apiFetch<{ notice?: string | null }>('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['keys'] })
       queryClient.invalidateQueries({ queryKey: ['health'] })
       queryClient.invalidateQueries({ queryKey: ['fallback'] })
+      setAddNotice(data?.notice ?? null)
       setPlatform('')
       setApiKey('')
       setAccountId('')
@@ -838,7 +1078,7 @@ export default function KeysPage() {
         description={t('keys.pageDescription')}
         actions={
           <>
-            {tab === 'providers' && keys.length > 0 && (
+            {(tab === 'providers' || tab === 'quotaSignals') && keys.length > 0 && (
               <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending}>
                 {checkAll.isPending ? t('keys.checking') : t('keys.checkAll')}
               </Button>
@@ -873,9 +1113,13 @@ export default function KeysPage() {
 
         {tab === 'anthropic' && <AnthropicSection />}
 
+        {tab === 'quotaSignals' && (
+          <QuotaSignalsSection states={(healthData?.quotaStates ?? []).slice(0, 24)} />
+        )}
+
         {tab === 'providers' && (
         <>
-        <QuotaSignalsSection states={(healthData?.quotaStates ?? []).slice(0, 24)} />
+        <ImportKeysSection />
         <section>
           <h2 className="text-sm font-medium mb-3">{t('keys.addProvider')}</h2>
           <form onSubmit={handleSubmit} className="flex flex-wrap gap-3 rounded-3xl border p-4 bg-card">
@@ -939,7 +1183,12 @@ export default function KeysPage() {
               </div>
             </div>
           </form>
-          {addKey.isError && <p className="mt-2 text-xs text-destructive">{(addKey.error as Error).message}</p>}
+          {addKey.isError && (
+            <p className="text-destructive text-xs mt-2">{(addKey.error as Error).message}</p>
+          )}
+          {addNotice && (
+            <p className="text-amber-600 dark:text-amber-500 text-xs mt-2" role="status">{addNotice}</p>
+          )}
         </section>
 
         <CustomProviderSection />

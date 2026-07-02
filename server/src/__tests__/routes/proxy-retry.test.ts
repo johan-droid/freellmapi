@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError, isProviderAuthFailoverError } from '../../routes/proxy.js';
+import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError, isProviderAuthFailoverError, isProviderBadRequestError } from '../../lib/error-classify.js';
 
 describe('isModelAccessForbiddenError (403 model-not-on-tier, drives whole-model skip — issue #256)', () => {
   it('flags a 403 reaching the proxy by message or attached status', () => {
@@ -87,6 +87,16 @@ describe('isRetryableError', () => {
 
     it('but a bare validation "400 Bad Request" (our own schema) is still NOT retryable', () => {
       expect(isRetryableError(new Error('400 Bad Request'))).toBe(false);
+    });
+
+    it('flags provider API 400s for invalid-request exhaustion reporting', () => {
+      const err = Object.assign(
+        new Error('Google API error 400: Invalid JSON payload received. Unknown name "x-google-enum-descriptions"'),
+        { status: 400 },
+      );
+      expect(isProviderBadRequestError(err)).toBe(true);
+      expect(isProviderBadRequestError(new Error('400 Bad Request'))).toBe(false);
+      expect(isProviderBadRequestError(Object.assign(new Error('Bad Request'), { status: 400 }))).toBe(false);
     });
   });
 

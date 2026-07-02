@@ -14,7 +14,7 @@ import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { rescueInlineToolCalls, startsWithDialectMarker, couldBecomeDialectMarker, containsDialectMarker } from '../lib/tool-call-rescue.js';
 import { getContextHandoffMode, recordIncomingMessages, maybeInjectContextHandoff, recordSuccessfulModel, hasPriorModel, HANDOFF_MAX_TOKENS } from '../services/context-handoff.js';
 import { isFusionModel, runFusion, fusionConfigSchema, FusionError, FUSION_MODEL_ID } from '../services/fusion.js';
-import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError, isProviderAuthFailoverError } from '../lib/error-classify.js';
+import { isRetryableError, isPaymentRequiredError, isModelNotFoundError, isModelAccessForbiddenError, isProviderAuthFailoverError, isProviderBadRequestError } from '../lib/error-classify.js';
 import { logRequest } from '../lib/request-log.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -149,6 +149,22 @@ export function applyFallbackErrorHeaders(res: Response, attemptedRoutes: string
   }
 }
 
+export function exhaustedRetryError(lastError: any, maxRetries?: number) {
+  const safeLastError = sanitizeProviderErrorMessage(lastError?.message);
+  if (isProviderBadRequestError(lastError)) {
+    return {
+      status: 400,
+      type: 'invalid_request_error',
+      message: `All routed providers rejected the request as invalid. Last error: ${safeLastError}`,
+    };
+  }
+  const scope = maxRetries == null ? 'All models rate-limited' : `All models rate-limited after ${maxRetries} attempts`;
+  return {
+    status: 429,
+    type: 'rate_limit_error',
+    message: `${scope}. Last error: ${safeLastError}`,
+  };
+}
 // Sticky sessions: track which model served each "session"
 // Key: hash of first user message → model_db_id
 // This prevents model switching mid-conversation which causes hallucination
@@ -733,12 +749,13 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
       );
     } catch (err: any) {
       if (lastError) {
+        const error = exhaustedRetryError(lastError);
         const meta = buildFallbackMeta(attemptedRoutes);
         applyFallbackErrorHeaders(res, attemptedRoutes);
-        res.status(429).json({
+        res.status(error.status).json({
           error: {
-            message: `All models rate-limited. Last error: ${sanitizeProviderErrorMessage(lastError.message)}`,
-            type: 'rate_limit_error',
+            message: error.message,
+            type: error.type,
           },
           ...meta,
         });
@@ -947,12 +964,13 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
+  const error = exhaustedRetryError(lastError, MAX_RETRIES);
   const meta = buildFallbackMeta(attemptedRoutes);
   applyFallbackErrorHeaders(res, attemptedRoutes);
-  res.status(429).json({
+  res.status(error.status).json({
     error: {
-      message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,
-      type: 'rate_limit_error',
+      message: error.message,
+      type: error.type,
     },
     ...meta,
   });
@@ -1368,13 +1386,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     } catch (err: any) {
       // No more models available
       if (lastError) {
-        const safeLastError = sanitizeProviderErrorMessage(lastError.message);
+        const error = exhaustedRetryError(lastError);
         const meta = buildFallbackMeta(attemptedRoutes);
         applyFallbackErrorHeaders(res, attemptedRoutes);
-        res.status(429).json({
+        res.status(error.status).json({
           error: {
-            message: `All models rate-limited. Last error: ${safeLastError}`,
-            type: 'rate_limit_error',
+            message: error.message,
+            type: error.type,
           },
           ...meta,
         });
@@ -1833,12 +1851,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   }
 
   // Exhausted all retries
+  const error = exhaustedRetryError(lastError, MAX_RETRIES);
   const meta = buildFallbackMeta(attemptedRoutes);
   applyFallbackErrorHeaders(res, attemptedRoutes);
-  res.status(429).json({
+  res.status(error.status).json({
     error: {
-      message: `All models rate-limited after ${MAX_RETRIES} attempts. Last: ${sanitizeProviderErrorMessage(lastError?.message)}`,
-      type: 'rate_limit_error',
+      message: error.message,
+      type: error.type,
     },
     ...meta,
   });
