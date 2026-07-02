@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@freellmapi/shared": "*",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
@@ -37,7 +37,7 @@
     "@types/express": "^5.0.2",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.15.3",
-    "drizzle-kit": "^0.31.1",
+    "drizzle-kit": "^1.0.0-rc.4",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"
