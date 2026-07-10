@@ -84,7 +84,7 @@ describe('Fallback API', () => {
     const { body } = await request(app, 'GET', '/api/fallback');
     const row = body.find((entry: any) => entry.modelDbId === target.id);
     expect(row).toBeDefined();
-    expect(row.keyCount).toBeGreaterThan(0);
+    expect(row.keyCount).toBe(0);
     expect(row.healthyKeyCount).toBe(0);
     expect(row.routable).toBe(false);
   });

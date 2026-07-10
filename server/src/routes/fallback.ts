@@ -129,13 +129,13 @@ fallbackRouter.get('/', (_req: Request, res: Response) => {
     WHERE enabled = 1
     GROUP BY platform
   `).all() as { platform: string; active_count: number; routable_count: number }[];
-  const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.active_count]));
+  const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.routable_count]));
   const healthyKeyCountMap = new Map(keyCounts.map(k => [k.platform, k.routable_count]));
   const customActiveKeyIds = new Set(
     (db.prepare(`
       SELECT id
       FROM api_keys
-      WHERE platform = 'custom' AND enabled = 1
+      WHERE platform = 'custom' AND enabled = 1 AND status IN ('healthy', 'unknown')
     `).all() as { id: number }[]).map(r => r.id),
   );
   const customHealthyKeyIds = new Set(

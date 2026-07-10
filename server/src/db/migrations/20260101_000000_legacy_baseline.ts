@@ -280,7 +280,7 @@ function ensureApiKeysBaseUrlColumn(db: Db) {
   }
 }
 
-function ensureApiKeysExtendedOptionsColumns(db: Database.Database) {
+function ensureApiKeysExtendedOptionsColumns(db: Db) {
   const columns = db.prepare('PRAGMA table_info(api_keys)').all() as { name: string }[];
   if (!columns.some(col => col.name === 'account_name')) {
     db.prepare('ALTER TABLE api_keys ADD COLUMN account_name TEXT').run();
@@ -1818,7 +1818,7 @@ function migrateModelsV22Tools(db: Db) {
   apply();
 }
 
-function migrateModelsV26IntentBias(db: Database.Database) {
+function migrateModelsV26IntentBias(db: Db) {
   const columns = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
   if (!columns.some(col => col.name === 'coding_bias')) {
     db.prepare('ALTER TABLE models ADD COLUMN coding_bias INTEGER NOT NULL DEFAULT 0').run();

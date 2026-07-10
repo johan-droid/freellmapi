@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import type Database from 'better-sqlite3';
+import type { Db } from '../db/index.js';
 import { resolveDatabaseUrlEnv } from '../env.js';
 
 type SecretSetting = { key: string; value: string };
@@ -504,7 +504,7 @@ export function hasRemoteSecretsStore(): boolean {
   return !!resolveDatabaseUrlEnv();
 }
 
-function readLocalSecretSnapshot(db: Database.Database): SecretSnapshot {
+function readLocalSecretSnapshot(db: Db): SecretSnapshot {
   const settings = db.prepare('SELECT key, value FROM settings ORDER BY key').all() as SecretSetting[];
   const apiKeys = db.prepare(`
     SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json
@@ -519,7 +519,7 @@ function readLocalSecretSnapshot(db: Database.Database): SecretSnapshot {
   return { settings, apiKeys, providerAccounts };
 }
 
-function upsertLocalSecrets(db: Database.Database, snapshot: SecretSnapshot): void {
+function upsertLocalSecrets(db: Db, snapshot: SecretSnapshot): void {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -584,14 +584,14 @@ function upsertLocalSecrets(db: Database.Database, snapshot: SecretSnapshot): vo
   apply();
 }
 
-export function hydrateSecretsFromRemote(db: Database.Database): boolean {
+export function hydrateSecretsFromRemote(db: Db): boolean {
   if (!hasRemoteSecretsStore()) return false;
   const snapshot = runRemoteCommand('pull') as SecretSnapshot;
   upsertLocalSecrets(db, snapshot);
   return true;
 }
 
-export function hydrateSecretsToRemote(db: Database.Database): boolean {
+export function hydrateSecretsToRemote(db: Db): boolean {
   if (!hasRemoteSecretsStore()) return false;
   runRemoteCommand('push', readLocalSecretSnapshot(db));
   return true;
@@ -619,7 +619,7 @@ async function flushQueuedRemotePushes(): Promise<void> {
   }
 }
 
-export function scheduleHydrateSecretsToRemote(db: Database.Database): boolean {
+export function scheduleHydrateSecretsToRemote(db: Db): boolean {
   if (!hasRemoteSecretsStore()) return false;
   pendingPushSnapshot = readLocalSecretSnapshot(db);
   queueMicrotask(() => {

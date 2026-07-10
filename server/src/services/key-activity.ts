@@ -1,5 +1,5 @@
 import { getDb } from '../db/index.js';
-import type { Database } from 'better-sqlite3';
+import type { Db } from '../db/index.js';
 
 export interface KeyActivitySummary {
   keyId: number;
@@ -22,7 +22,7 @@ const ZERO_ACTIVITY: Omit<KeyActivitySummary, 'keyId'> = {
   lastErrorMessage: null,
 };
 
-export function getKeyActivitySummaryMap(db: Database = getDb()): Map<number, KeyActivitySummary> {
+export function getKeyActivitySummaryMap(db: Db = getDb()): Map<number, KeyActivitySummary> {
   const rows = db.prepare(`
     SELECT
       ak.id AS key_id,
@@ -70,6 +70,6 @@ export function getKeyActivitySummaryMap(db: Database = getDb()): Map<number, Ke
   return activity;
 }
 
-export function getKeyActivityFor(keyId: number, db: Database = getDb()): KeyActivitySummary {
+export function getKeyActivityFor(keyId: number, db: Db = getDb()): KeyActivitySummary {
   return getKeyActivitySummaryMap(db).get(keyId) ?? { keyId, ...ZERO_ACTIVITY };
 }

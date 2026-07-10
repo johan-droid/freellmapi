@@ -1,7 +1,7 @@
 import fs from 'fs';
-import Database from 'better-sqlite3';
+import type { Db } from './types.js';
 
-function databasePath(db: Database.Database): string | undefined {
+function databasePath(db: Db): string | undefined {
   const rows = db.pragma('database_list') as Array<{ name: string; file: string }>;
   return rows.find(row => row.name === 'main')?.file || undefined;
 }
@@ -26,7 +26,7 @@ function lockDownFile(pathname: string | undefined): void {
   }
 }
 
-export function hardenDatabase(db: Database.Database): void {
+export function hardenDatabase(db: Db): void {
   // Avoid SQLITE_BUSY crashes under concurrent dashboard + proxy writes.
   db.pragma('busy_timeout = 5000');
 

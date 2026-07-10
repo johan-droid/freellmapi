@@ -1,11 +1,11 @@
-import type Database from 'better-sqlite3';
+import type { Db } from './types.js';
 
-function hasColumn(db: Database.Database, table: string, column: string): boolean {
+function hasColumn(db: Db, table: string, column: string): boolean {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   return rows.some(row => row.name === column);
 }
 
-export function ensurePersistenceSchema(db: Database.Database): void {
+export function ensurePersistenceSchema(db: Db): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS provider_accounts (
       id TEXT PRIMARY KEY,
@@ -261,7 +261,7 @@ export function ensurePersistenceSchema(db: Database.Database): void {
   seedClientProfiles(db);
 }
 
-function seedClientProfiles(db: Database.Database): void {
+function seedClientProfiles(db: Db): void {
   const profiles = [
     {
       id: 'client_profile_claude_code',

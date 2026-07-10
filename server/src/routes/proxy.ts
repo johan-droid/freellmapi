@@ -1850,8 +1850,8 @@ export function applyRouteHeaders(res: Response, route: Pick<RouteResult, 'platf
 
 export function applyFallbackErrorHeaders(res: Response, attemptedRoutes: string[]) {
   const meta = buildFallbackMeta(attemptedRoutes);
-  if (meta.fallbackAttempts > 0) {
-    res.setHeader('X-Fallback-Attempts', String(meta.fallbackAttempts));
+  if (attemptedRoutes.length > 0) {
+    res.setHeader('X-Fallback-Attempts', String(attemptedRoutes.length));
   }
   if (meta.lastRoutedVia) {
     res.setHeader('X-Routed-Via', meta.lastRoutedVia);

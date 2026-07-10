@@ -1,4 +1,4 @@
-import type DatabaseType from 'better-sqlite3';
+import type { Db } from '../db/index.js';
 
 export interface ModelIntentFlags {
   codingBias: number;
@@ -81,7 +81,7 @@ export function inferModelIntentFlags(row: {
   };
 }
 
-export function refreshModelIntentFlags(db: DatabaseType.Database): void {
+export function refreshModelIntentFlags(db: Db): void {
   const rows = db.prepare(`
     SELECT id, platform, model_id, display_name, size_label, supports_tools, context_window
     FROM models
