@@ -11,11 +11,12 @@ Aggregate the free tiers from Google, Groq, Cerebras, NVIDIA, Mistral, OpenRoute
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 [![Docker image](https://img.shields.io/badge/ghcr.io-freellmapi-2496ED?logo=docker&logoColor=white)](https://github.com/tashfeenahmed/freellmapi/pkgs/container/freellmapi)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tashfeenahmed/freellmapi)
 
 **[freellmapi.co](https://freellmapi.co)** · browse all 161 free models on the live catalog
 
 Your router updates its own model catalog. Free installs get each new model 30 days after it ships;
-**[Premium gets it the day it lands, and is 79 models ahead right now](https://freellmapi.co/?utm_source=github&utm_medium=readme#pricing)** ($19/yr, 30-day refund).
+**[Premium gets it the day it lands, and is 79 models ahead right now](https://freellmapi.co/?utm_source=github&utm_medium=readme#pricing)** ($19/yr, cancel anytime).
 
 ![Fallback chain with per-provider token budget](repo-assets/fallback-chain.png)
 
@@ -81,6 +82,7 @@ And the free-tier landscape shifts weekly: providers launch models, retire them,
 </tr>
 <tr>
 <td align="center"><a href="https://endpoints.ai.cloud.ovh.net"><b>OVH AI Endpoints</b><br/>Qwen3.5 397B · GPT-OSS · Llama 3.3 (anon ok)</a></td>
+<td align="center"><a href="https://router.bynara.id"><b>NaraRouter</b><br/>Mistral Large · Mistral Medium · Tencent Hy3</a></td>
 <td align="center"><a href="https://aihorde.net"><b>AI Horde</b><br/>Community Llama · Gemma · Cydonia (anon ok, slow)</a></td>
 <td align="center"></td>
 <td align="center"></td>
@@ -140,6 +142,7 @@ On Windows, the easiest path is the desktop **[`.exe` installer from Releases](h
 
 **Prerequisites:** Docker, Docker Compose, OpenSSL.
 
+*On macOS / Linux (Bash):*
 ```bash
 git clone https://github.com/tashfeenahmed/freellmapi.git
 cd freellmapi
@@ -148,6 +151,18 @@ cd freellmapi
 ENCRYPTION_KEY="$(openssl rand -hex 32)"
 printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 
+docker compose up -d
+```
+
+*On Windows (PowerShell):*
+```powershell
+git clone https://github.com/tashfeenahmed/freellmapi.git
+cd freellmapi
+
+$Bytes = New-Object Byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($Bytes)
+$ENCRYPTION_KEY = -join ($Bytes | ForEach-Object { "{0:x2}" -f $_ })
+"ENCRYPTION_KEY=$ENCRYPTION_KEY`nPORT=3001" | Out-File -Encoding utf8 .env
 docker compose up -d
 ```
 
@@ -167,19 +182,31 @@ Your fresh install ships with the free catalog snapshot (82 models today) and ke
 
 **Prerequisites:** Node.js 20+, npm.
 
+*On macOS / Linux (Bash):*
 ```bash
 git clone https://github.com/tashfeenahmed/freellmapi.git
 cd freellmapi
 npm install
-cp .env.example .env
 ENCRYPTION_KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
 printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 npm run dev
 ```
 
-`ENCRYPTION_KEY` is required for startup. The server only falls back to a
-database-stored development key when `DEV_MODE=true` and `NODE_ENV` is not
-`production`; do not use that fallback with real provider keys.
+*On Windows (PowerShell):*
+```powershell
+git clone https://github.com/tashfeenahmed/freellmapi.git
+cd freellmapi
+npm install
+$ENCRYPTION_KEY = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+"ENCRYPTION_KEY=$ENCRYPTION_KEY`nPORT=3001" | Out-File -Encoding utf8 .env
+npm run dev
+```
+
+`ENCRYPTION_KEY` is required for startup. When `NODE_ENV` is not `production`
+and it is unset, the server auto-generates a development key and saves it to a
+`.encryption-key` file (0600) next to the SQLite database, not inside it. Older
+installs that kept the key in the database are migrated to this file on first
+boot. Do not rely on that fallback with real provider keys; set `ENCRYPTION_KEY`.
 
 Request analytics are retained for 90 days or 100000 request rows by default,
 whichever limit prunes first. Set `REQUEST_ANALYTICS_RETENTION_DAYS=0` or
@@ -284,10 +311,13 @@ request stats.
 
 **[Download from Releases](https://github.com/tashfeenahmed/freellmapi/releases/latest)** — the macOS `.dmg` and the Windows `.exe` installer are built and attached to every release by the [`desktop-release`](.github/workflows/desktop-release.yml) workflow. Or build it from this repo in a few minutes:
 
+> **Note for Windows users building from source:** Building the desktop app requires compiling native SQLite modules for Electron. You must have [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) installed (specifically the "Desktop development with C++" workload) and Python installed before running `npm install`.
+
 ```bash
 npm install
-npm run desktop:dist        # macOS  → desktop/dist-electron/FreeLLMAPI-…-arm64.dmg
-npm run desktop:dist:win    # Windows → "desktop/dist-electron/FreeLLMAPI Setup ….exe"
+npm install --prefix desktop  # install desktop dependencies
+npm run desktop:dist          # macOS  → desktop/dist-electron/FreeLLMAPI-…-arm64.dmg
+npm run desktop:dist:win      # Windows → "desktop/dist-electron/FreeLLMAPI Setup ….exe"
 ```
 
 > Locally built apps are unsigned, so Windows SmartScreen may warn on first run
@@ -399,7 +429,7 @@ the free-tier wave and reading about it.
 
 **[Go live at freellmapi.co →](https://freellmapi.co/?utm_source=github&utm_medium=readme#pricing)**
 
-- $19/year or $49 once, lifetime. Stripe checkout, 30-day no-questions refund.
+- $19/year or $49 once, lifetime. Stripe checkout; cancel anytime, self-serve.
 - One `fla_` key covers every router you run: desktop, homelab, Raspberry Pi.
 - Activate in the dashboard under **Premium**; cancel or manage billing
   self-serve at [freellmapi.co/manage](https://freellmapi.co/manage).
@@ -605,9 +635,17 @@ Claude model names map to your free pool on the **Keys → Anthropic** tab: each
 
 **Claude Code** — point it at your server and start it:
 
+*On macOS / Linux (Bash):*
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:3001
 export ANTHROPIC_AUTH_TOKEN=freellmapi-your-unified-key   # NOT ANTHROPIC_API_KEY
+claude
+```
+
+*On Windows (PowerShell):*
+```powershell
+$env:ANTHROPIC_BASE_URL="http://localhost:3001"
+$env:ANTHROPIC_AUTH_TOKEN="freellmapi-your-unified-key"
 claude
 ```
 
@@ -807,6 +845,14 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full migration CLI and workflow
 <a href="https://github.com/86TheCactus"><img src="https://images.weserv.nl/?url=github.com/86TheCactus.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@86TheCactus" /></a>
 <a href="https://github.com/AmiroKD"><img src="https://images.weserv.nl/?url=github.com/AmiroKD.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@AmiroKD" /></a>
 <a href="https://github.com/ecryptomillionaire-dev"><img src="https://images.weserv.nl/?url=github.com/ecryptomillionaire-dev.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@ecryptomillionaire-dev" /></a>
+<a href="https://github.com/4riful"><img src="https://images.weserv.nl/?url=github.com/4riful.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@4riful" /></a>
+<a href="https://github.com/cagedbird043"><img src="https://images.weserv.nl/?url=github.com/cagedbird043.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@cagedbird043" /></a>
+<a href="https://github.com/fix2015"><img src="https://images.weserv.nl/?url=github.com/fix2015.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@fix2015" /></a>
+<a href="https://github.com/iisyw"><img src="https://images.weserv.nl/?url=github.com/iisyw.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@iisyw" /></a>
+<a href="https://github.com/xsfhacg"><img src="https://images.weserv.nl/?url=github.com/xsfhacg.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@xsfhacg" /></a>
+<a href="https://github.com/noobix"><img src="https://images.weserv.nl/?url=github.com/noobix.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@noobix" /></a>
+<a href="https://github.com/nandukmelath"><img src="https://images.weserv.nl/?url=github.com/nandukmelath.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@nandukmelath" /></a>
+<a href="https://github.com/coffcoe"><img src="https://images.weserv.nl/?url=github.com/coffcoe.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@coffcoe" /></a>
 
 ## Terms of Service review
 

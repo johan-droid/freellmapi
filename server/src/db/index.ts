@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import Database from 'better-sqlite3';
+import BetterSqlite from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,12 +7,15 @@ import { resolveDefaultDbPath } from '../env.js';
 import { runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import type { Db, DbFactory } from './types.js';
+
+export type { Db, DbFactory } from './types.js';
 
 const DB_PATH = resolveDefaultDbPath();
 
-let db: Database.Database;
+let db: Db;
 
-export function getDb(): Database.Database {
+export function getDb(): Db {
   if (!db) {
     throw new Error('Database not initialized. Call initDb() or connectDb() first.');
   }
@@ -23,17 +26,25 @@ export function getDefaultDbPath(): string {
   return process.env.FREEAPI_DB_PATH?.trim() || DB_PATH;
 }
 
+/** Default factory: opens a better-sqlite3 connection at the given path. */
+function betterSqliteFactory(resolvedPath: string): Db {
+  return new BetterSqlite(resolvedPath) as unknown as Db;
+}
+
 export function connectDb(
   dbPath?: string,
   opts?: {
     /** Create the parent directory if absent. Default: true. Set false in
      *  environments that do not have a writable local filesystem. */
     ensureDir?: boolean;
+    /** Factory that constructs the raw Db connection. Default: better-sqlite3. */
+    factory?: DbFactory;
   },
-): Database.Database {
+): Db {
   const resolvedPath = dbPath ?? getDefaultDbPath();
   const isMemory = resolvedPath === ':memory:';
   const ensureDir = opts?.ensureDir ?? true;
+  const factory = opts?.factory ?? betterSqliteFactory;
 
   if (!isMemory && ensureDir) {
     const dataDir = path.dirname(resolvedPath);
@@ -42,7 +53,7 @@ export function connectDb(
     }
   }
 
-  db = new Database(resolvedPath);
+  db = factory(resolvedPath);
   if (!isMemory) db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   console.log(`Database initialized at ${resolvedPath}`);
@@ -51,8 +62,8 @@ export function connectDb(
 
 export function initDb(
   dbPath?: string,
-  opts?: { ensureDir?: boolean },
-): Database.Database {
+  opts?: { ensureDir?: boolean; factory?: DbFactory },
+): Db {
   const db = connectDb(dbPath, opts);
 
   if (process.env.NODE_ENV !== 'development') {

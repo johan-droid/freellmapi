@@ -5,6 +5,7 @@ export interface PreviewKey {
   keyValue: string;
   detectedPlatform: string | null;
   prefix: string;
+  isDuplicate?: boolean;
 }
 
 export interface ImportKey {
@@ -17,6 +18,7 @@ export interface PreviewResponse {
   keys: PreviewKey[];
   total: number;
   skipped: string[];
+  duplicates: number;
 }
 
 export interface ImportSelectedRequest {
@@ -83,6 +85,10 @@ export type Platform =
   // ~10M tokens/month free allocation (no card); quota unverified. Key from
   // ainative.studio.
   | 'ainative'
+  // NaraRouter — OpenAI-compatible aggregator. Free account key from
+  // router.bynara.id after Telegram channel/link verification; free-plan routes
+  // reset daily and are catalog-managed (premium now, free after 30 days).
+  | 'nara'
   // AI Horde — free, community-powered inference (volunteer workers) via an
   // OpenAI-compatible proxy (https://oai.aihorde.net/v1). Queue-based, so calls
   // can take tens of seconds; no tool support; usage is reported as kudos, not
@@ -173,6 +179,7 @@ export interface ApiKey {
   baseUrl: string | null;
   status: KeyStatus;
   enabled: boolean;
+  keyless: boolean;
   createdAt: string;
   lastCheckedAt: string | null;
   activity: ApiKeyActivity;

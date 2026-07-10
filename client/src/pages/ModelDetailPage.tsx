@@ -5,20 +5,22 @@ import { ChevronLeft, Save, Trash2 } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { ConfirmButton } from '@/components/confirm-button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { CopyButton } from '@/components/copy-button'
+import { TableSkeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/tooltip'
 import { PageHeader } from '@/components/page-header'
 import { ModelsTabs } from '@/components/models-tabs'
+import { ModelTableHead, RowContent } from '@/components/model-table'
 import {
-  ModelTableHead,
-  RowContent,
   groupQuotaBadge,
+  providerLabel,
   type FallbackEntry,
   type RoutingData,
   type Row,
-} from './FallbackPage'
+} from '@/lib/routing'
 
 type ModelSettingsPatch = {
   displayName: string
@@ -126,7 +128,7 @@ export default function ModelDetailPage() {
         </Link>
 
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+          <TableSkeleton rows={3} />
         ) : members.length === 0 ? (
           <div className="rounded-3xl border border-dashed p-8 text-center">
             <p className="text-sm text-muted-foreground">{t('models.modelNotFound')}</p>
@@ -181,7 +183,7 @@ export default function ModelDetailPage() {
               <div className="space-y-1.5">
                 {members.map(m => (
                   <div key={m.modelDbId} className="flex items-center gap-2 text-xs">
-                    <span className="w-28 shrink-0 text-muted-foreground">{m.platform}</span>
+                    <span className="w-28 shrink-0 text-muted-foreground">{providerLabel(m)}</span>
                     <code className="min-w-0 flex-1 truncate font-mono text-[11px]">{m.modelId}</code>
                     <Tooltip text={t('models.copyModelName')}>
                       <CopyButton text={m.modelId} label={t('models.copyModelName')} className="border-0 bg-transparent" />
@@ -225,7 +227,6 @@ function ProviderSettingsRow({
   const [supportsVision, setSupportsVision] = useState(model.supportsVision)
   const [supportsTools, setSupportsTools] = useState(model.supportsTools)
   const [fallbackEnabled, setFallbackEnabled] = useState(model.enabled)
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     setDisplayName(model.displayName)
@@ -233,14 +234,7 @@ function ProviderSettingsRow({
     setSupportsVision(model.supportsVision)
     setSupportsTools(model.supportsTools)
     setFallbackEnabled(model.enabled)
-    setConfirmDelete(false)
   }, [model.modelDbId, model.displayName, model.contextWindow, model.supportsVision, model.supportsTools, model.enabled])
-
-  useEffect(() => {
-    if (!confirmDelete) return
-    const timer = window.setTimeout(() => setConfirmDelete(false), 3000)
-    return () => window.clearTimeout(timer)
-  }, [confirmDelete])
 
   const parsedContext = contextWindow.trim() === '' ? null : Number(contextWindow)
   const contextInvalid = parsedContext !== null && (!Number.isInteger(parsedContext) || parsedContext <= 0)
@@ -265,18 +259,10 @@ function ProviderSettingsRow({
     })
   }
 
-  function remove() {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
-    onDelete()
-  }
-
   return (
     <div className="rounded-xl border bg-background/60 p-3">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium">{model.platform}</span>
+        <span className="text-xs font-medium">{providerLabel(model)}</span>
         <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{model.modelId}</code>
         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{sourceLabel}</span>
         {model.hasOverrides && (
@@ -325,15 +311,17 @@ function ProviderSettingsRow({
               <Save className="size-3.5" />
             </Button>
           </Tooltip>
-          <Button
-            type="button"
-            size={confirmDelete ? 'xs' : 'icon-sm'}
+          <ConfirmButton
             variant="destructive"
+            size="icon-sm"
+            armedSize="xs"
+            armedClassName=""
             disabled={saving || deleting}
-            onClick={remove}
+            onConfirm={onDelete}
+            aria-label={t('common.delete')}
           >
-            {confirmDelete ? t('common.confirm') : <Trash2 className="size-3.5" />}
-          </Button>
+            <Trash2 className="size-3.5" />
+          </ConfirmButton>
         </div>
       </div>
     </div>
