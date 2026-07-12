@@ -49,7 +49,7 @@ export default function ModelDetailPage() {
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
   })
 
   // Toggling a provider persists immediately (no save bar on this page): send the

@@ -136,7 +136,7 @@ export default function PlaygroundPage() {
 
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
   })
 
   const { data: fallbackEntries = [] } = useQuery<FallbackEntry[]>({

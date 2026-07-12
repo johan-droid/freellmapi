@@ -39,7 +39,7 @@ export function GettingStarted() {
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
   })
 
   // Wait for real data before deciding: rendering on undefined would flash the

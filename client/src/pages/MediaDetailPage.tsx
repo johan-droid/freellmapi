@@ -25,7 +25,7 @@ export default function MediaDetailPage({ modality }: { modality: 'image' | 'aud
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
   })
 
   const toggle = useMutation({

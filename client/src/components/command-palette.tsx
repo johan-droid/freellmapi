@@ -92,7 +92,7 @@ export function CommandPalette() {
   })
   const { data: keyData } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
     enabled: open,
   })
 

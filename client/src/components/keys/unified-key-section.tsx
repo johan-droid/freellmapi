@@ -12,7 +12,7 @@ export function UnifiedKeySection() {
 
   const { data, isError } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
-    queryFn: () => apiFetch('/api/settings/api-key'),
+    queryFn: () => apiFetch('/api/settings/api-key/reveal', { method: 'POST' }),
   })
 
   const regenerate = useMutation({
