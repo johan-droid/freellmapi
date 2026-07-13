@@ -282,12 +282,6 @@ const cooldowns = new Map<string, number>(); // key -> expiry timestamp
 // will re-escalate on the next 429 if the quota is genuinely exhausted).
 const cooldownHits = new Map<string, number[]>(); // key -> timestamps of recent cooldown set events
 const HOUR = 60 * MINUTE;
-const COOLDOWN_DURATIONS = [
-  2 * MINUTE,   // 1st hit in 24h
-  10 * MINUTE,  // 2nd
-  HOUR,         // 3rd
-  DAY,          // 4th and beyond
-];
 
 export function getNextCooldownDuration(platform: string, modelId: string, keyId: number): number {
   const key = `${platform}:${modelId}:${keyId}`;
@@ -295,8 +289,20 @@ export function getNextCooldownDuration(platform: string, modelId: string, keyId
   const hits = (cooldownHits.get(key) ?? []).filter(t => t > now - DAY);
   hits.push(now);
   cooldownHits.set(key, hits);
-  const idx = Math.min(hits.length - 1, COOLDOWN_DURATIONS.length - 1);
-  return COOLDOWN_DURATIONS[idx]!;
+
+  // Exponential backoff with jitter
+  const baseDelay = 2000;
+  const maxDelay = 60000;
+
+  // Exponential backoff: 2s, 4s, 8s, 16s, 32s, 60s
+  const attempt = hits.length - 1; // 0-indexed for calculation
+  const backoff = baseDelay * Math.pow(2, attempt);
+  const cappedBackoff = Math.min(backoff, maxDelay);
+
+  // Jitter: ±20%
+  const jitterFactor = 0.8 + Math.random() * 0.4;
+
+  return Math.floor(cappedBackoff * jitterFactor);
 }
 
 // Short cooldown for a transient (per-minute) 429 — recovers within ~one window.
@@ -400,7 +406,7 @@ export function getCooldownDurationForLimit(
   }
   const base = (rpdExhausted || tpdExhausted || heuristicallyExhausted)
     ? getNextCooldownDuration(platform, modelId, keyId)
-    : TRANSIENT_COOLDOWN_MS;
+    : getNextCooldownDuration(platform, modelId, keyId);
   // Honor an upstream Retry-After as a floor: never bench shorter than our own
   // heuristic, but extend (capped at a day) when the provider explicitly asks
   // to wait longer than we otherwise would.

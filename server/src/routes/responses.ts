@@ -1,3 +1,4 @@
+import { metrics } from '../lib/metrics.js';
 import crypto from 'crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
@@ -23,6 +24,7 @@ import {
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { isAutoModel } from '../services/request-intent.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
+import { truncateMessagesToFit, estimateTokens } from '../lib/context-truncation.js';
 import { contentToString } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { rescueInlineToolCalls, startsWithDialectMarker, couldBecomeDialectMarker, containsDialectMarker } from '../lib/tool-call-rescue.js';
@@ -470,6 +472,53 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         requestedModel: attempt === 0 ? requestedModelLabel : undefined,
       });
       attemptedRoutes.push(`${route.platform}/${route.modelId}`);
+
+      let outboundMessages = messages;
+      let dispatchMaxTokens = reqData.max_output_tokens ?? undefined;
+
+      if (route.contextWindow) {
+        const effectiveLimit = Math.floor(route.contextWindow * 0.97);
+        const SAFETY_MARGIN = 2048;
+
+        const providerOutputCaps: Record<string, number> = {
+          'openrouter': 16000,
+          'cloudflare': 8192,
+          'groq': 4096,
+          'cerebras': 8192,
+          'ollama': 32000,
+          'nvidia': 32000,
+        };
+        const cap = providerOutputCaps[route.platform];
+        let desiredOutputTokens = dispatchMaxTokens ?? 1000;
+        if (cap && desiredOutputTokens > cap) {
+          desiredOutputTokens = cap;
+        }
+
+        const toolTokens = wantsTools ? 1000 : 0;
+        const truncResult = truncateMessagesToFit(outboundMessages, effectiveLimit, desiredOutputTokens, toolTokens, SAFETY_MARGIN);
+
+        const available = effectiveLimit - truncResult.inputTokens - toolTokens - SAFETY_MARGIN;
+
+        if (available <= 0) {
+          res.status(400).json({
+            error: {
+              message: `Request exceeds context window for ${route.displayName}`,
+              type: 'invalid_request_error'
+            }
+          });
+          return 'committed';
+        }
+
+        outboundMessages = truncResult.messages;
+        dispatchMaxTokens = Math.min(desiredOutputTokens, available);
+        completionOpts.max_tokens = dispatchMaxTokens;
+
+        if (truncResult.truncated) {
+          console.log(`[Responses] Truncated ${truncResult.truncatedCount} messages to fit ${route.displayName} context window (${route.contextWindow})`);
+          metrics.context_overflow_prevented_total++;
+        }
+      }
+
       if (stream) {
         let outputIndex = 0;
         let msgItemId: string | null = null;
@@ -528,9 +577,9 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
         try {
           const gen = route.provider.streamChatCompletion(
             route.apiKey,
-            messages,
-            route.modelId,
-            completionOpts,
+            outboundMessages,
+        route.modelId,
+        completionOpts,
             quotaContextForRoute(route, 'responses'),
           );
 
@@ -726,7 +775,7 @@ responsesRouter.post('/responses', async (req: Request, res: Response) => {
 
       const result = await route.provider.chatCompletion(
         route.apiKey,
-        messages,
+        outboundMessages,
         route.modelId,
         completionOpts,
         quotaContextForRoute(route, 'responses'),

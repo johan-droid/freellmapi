@@ -1,3 +1,4 @@
+import { metrics } from './metrics.js';
 // One shared provider retry/fallback loop for every OpenAI-, Responses- and
 // Anthropic-shaped chat surface (routes/proxy.ts legacy /completions and
 // /chat/completions, routes/responses.ts, routes/anthropic.ts). Each surface
@@ -151,6 +152,7 @@ export function recordRetryableFailure(route: RouteResult, err: any, state: Fall
   }
   state.skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
   if (err?.skipBench === true) return;
+  if (isDailyQuotaExhaustedError(err) || (err?.message ?? '').toLowerCase().includes('429') || (err?.message ?? '').toLowerCase().includes('rate limit')) metrics.provider_429_total++;
   setCooldown(route.platform, route.modelId, route.keyId, cooldownForError(route, err));
   // Model-level penalty only when no sibling key can still serve (#454).
   if (!hasOtherUsableKey(route.modelDbId, route.keyId, state.skipKeys)) {
@@ -195,6 +197,7 @@ export function recordAuthFailure(route: RouteResult, state: FallbackState): voi
   state.skipKeys.add(`${route.platform}:${route.modelId}:${route.keyId}`);
   setCooldown(route.platform, route.modelId, route.keyId, AUTH_FAILURE_COOLDOWN_MS);
   triggerKeyRevalidation(route.platform, route.keyId);
+  metrics.provider_401_total++;
 }
 
 /**
@@ -265,6 +268,9 @@ export interface ExhaustionBody {
   status: number;
   type: string;
   message: string;
+  code?: string;
+  retry_after_seconds?: number;
+  available_after?: string;
   // Coarse class of the exhaustion, for surfaces that need to remap `type` to
   // their own wire vocabulary (the Anthropic route maps 'auth' → 'api_error').
   kind: 'auth' | 'bad_request' | 'rate_limit';
@@ -291,6 +297,7 @@ export interface ExhaustionContext {
  * terse "Last error" line with none of that context.
  */
 export function exhaustedRetryError(lastError: any, maxRetries?: number, ctx?: ExhaustionContext): ExhaustionBody {
+  metrics.routing_exhausted_total++;
   const safeLastError = sanitizeProviderErrorMessage(lastError?.message);
   const attempts = ctx?.attempts ?? [];
   const trail = attempts.length > 0 ? ` Attempt trail: ${formatAttemptTrail(attempts)}.` : '';
@@ -322,14 +329,22 @@ export function exhaustedRetryError(lastError: any, maxRetries?: number, ctx?: E
   const scope = attemptCount == null
     ? 'All models rate-limited'
     : `All models rate-limited after ${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`;
-  const eta = formatResetEta(getSoonestCooldownExpiry());
+
+  const expiry = getSoonestCooldownExpiry();
+  const eta = formatResetEta(expiry);
   const etaNote = eta ? ` Soonest cooldown reset ${eta}.` : '';
+
+  const retryAfterSeconds = expiry ? Math.max(1, Math.ceil((expiry - Date.now()) / 1000)) : undefined;
+
   return {
     kind: 'rate_limit',
     status: 429,
     type: 'rate_limit_error',
+    code: 'PROVIDER_COOLDOWN',
+    retry_after_seconds: retryAfterSeconds,
+    available_after: expiry ? new Date(expiry).toISOString() : undefined,
     message: `${scope}${budgetNote}.${etaNote}${trail} Last error: ${safeLastError}`,
-  };
+  } as any;
 }
 
 // What a surface's dispatch() returns to signal the response is finished and the

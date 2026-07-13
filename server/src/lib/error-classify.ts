@@ -111,6 +111,10 @@ export function isKeyAuthError(err: any): boolean {
   const status = typeof err?.status === 'number' ? err.status : 0;
   if (status === 401) return true;
   const msg = (err?.message ?? '').toLowerCase();
+
+  // Cloudflare 401 Auth error check
+  if (msg.includes('cloudflare api error 401')) return true;
+
   const keySpecific = msg.includes('api key not valid')
     || msg.includes('api key expired')
     || msg.includes('api_key_invalid');

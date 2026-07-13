@@ -137,6 +137,7 @@ export interface RouteResult {
   // exhaustion (escalate the cooldown) from a transient per-minute spike.
   rpdLimit: number | null;
   tpdLimit: number | null;
+  contextWindow: number | null;
 }
 
 // ── Routing token estimate: cap the reserved OUTPUT, not the full max_tokens ──
@@ -884,6 +885,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
       displayName: entry.display_name,
       rpdLimit: limits.rpd,
       tpdLimit: limits.tpd,
+      contextWindow: entry.context_window,
     };
   }
 

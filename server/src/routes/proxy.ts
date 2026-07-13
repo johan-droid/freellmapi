@@ -1,3 +1,4 @@
+import { metrics } from '../lib/metrics.js';
 import crypto from 'crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
@@ -21,6 +22,7 @@ import { runFallbackLoop, newFallbackState, recordUpstreamSuccess, exhaustedRetr
 import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
+import { truncateMessagesToFit, estimateTokens } from '../lib/context-truncation.js';
 import { buildModelListing } from '../services/model-listing.js';
 
 export const proxyRouter = Router();
@@ -1405,6 +1407,50 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       injectedHandoffTokens = handoff.injectedTokens;
     }
 
+    // Dynamic Token Budgeting & Overflow Prevention
+    let dispatchMaxTokens = max_tokens;
+    if (route.contextWindow) {
+      const effectiveLimit = Math.floor(route.contextWindow * 0.97);
+      const SAFETY_MARGIN = 2048;
+
+      const providerOutputCaps: Record<string, number> = {
+        'openrouter': 16000,
+        'cloudflare': 8192,
+        'groq': 4096,
+        'cerebras': 8192,
+        'ollama': 32000,
+        'nvidia': 32000,
+      };
+      const cap = providerOutputCaps[route.platform];
+      let desiredOutputTokens = dispatchMaxTokens ?? 1000;
+      if (cap && desiredOutputTokens > cap) {
+        desiredOutputTokens = cap;
+      }
+
+      const toolTokens = wantsTools ? 1000 : 0;
+      const truncResult = truncateMessagesToFit(outboundMessages, effectiveLimit, desiredOutputTokens, toolTokens, SAFETY_MARGIN);
+
+      const available = effectiveLimit - truncResult.inputTokens - toolTokens - SAFETY_MARGIN;
+
+      if (available <= 0) {
+        res.status(400).json({
+          error: {
+            message: `Request exceeds context window for ${route.displayName}`,
+            type: 'invalid_request_error'
+          }
+        });
+        return 'committed';
+      }
+
+      outboundMessages = truncResult.messages;
+      dispatchMaxTokens = Math.min(desiredOutputTokens, available);
+
+      if (truncResult.truncated) {
+        console.log(`[Proxy] Truncated ${truncResult.truncatedCount} messages to fit ${route.displayName} context window (${route.contextWindow})`);
+        metrics.context_overflow_prevented_total++;
+      }
+    }
+
       if (stream) {
         // — Stream turn-integrity (#231 audit) —
         // The old loop forwarded upstream chunks verbatim and called any
@@ -1460,7 +1506,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         try {
           const gen = route.provider.streamChatCompletion(
             route.apiKey, outboundMessages, route.modelId,
-            { temperature, max_tokens, top_p, stop, tools, tool_choice, parallel_tool_calls },
+            { temperature, max_tokens: dispatchMaxTokens, top_p, stop, tools, tool_choice, parallel_tool_calls },
             quotaContextForRoute(route, 'chat/completions'),
           );
 
@@ -1662,7 +1708,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       } else {
         const result = await route.provider.chatCompletion(
           route.apiKey, outboundMessages, route.modelId,
-          { temperature, max_tokens, top_p, stop, tools, tool_choice, parallel_tool_calls },
+          { temperature, max_tokens: dispatchMaxTokens, top_p, stop, tools, tool_choice, parallel_tool_calls },
           quotaContextForRoute(route, 'chat/completions'),
         );
 
