@@ -197,11 +197,21 @@ function snapshotTableRows(db: Database.Database, tableName: string): unknown[] 
   const columns = db.prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`).all() as { name: string }[];
   const orderBy = columns.map(column => quoteIdentifier(column.name)).join(', ');
 
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT *
       FROM ${quoteIdentifier(tableName)}
      ORDER BY ${orderBy}
-  `).all() as unknown[];
+  `).all() as Record<string, unknown>[];
+
+  return rows.map(row => {
+    const cleaned: Record<string, unknown> = { ...row };
+    for (const key of Object.keys(cleaned)) {
+      if (['updated_at', 'created_at', 'detected_at', 'last_seen_at'].includes(key) && typeof cleaned[key] === 'string') {
+        cleaned[key] = '[TIMESTAMP]';
+      }
+    }
+    return cleaned;
+  });
 }
 
 function hasTable(db: Database.Database, tableName: string): boolean {
