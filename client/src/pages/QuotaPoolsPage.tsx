@@ -4,7 +4,6 @@ import {
   Zap, 
   RefreshCw, 
   Copy, 
-  Check, 
   Layers, 
   Cpu, 
   ShieldCheck, 
@@ -27,7 +26,9 @@ import {
 import mermaid from 'mermaid'
 import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
-import { buttonVariants } from '@/components/ui/button'
+import { PageHeader } from '@/components/page-header'
+import { ModelsTabs } from '@/components/models-tabs'
+import { Tooltip } from '@/components/tooltip'
 
 export interface QuotaPoolModel {
   id: number
@@ -139,10 +140,9 @@ function generateMermaidMarkdown(pools: QuotaPool[]): string {
 
 export default function QuotaPoolsPage() {
   const queryClient = useQueryClient()
-  const [copied, setCopied] = useState(false)
   const [search, setSearch] = useState('')
   const [animating, setAnimating] = useState(true)
-  const [autoRefresh, setAutoRefresh] = useState(false) // Default off to prevent annoying updates
+  const [autoRefresh, setAutoRefresh] = useState(false)
   const [activeTab, setActiveTab] = useState<'visual' | 'graph' | 'compiler' | 'cards' | 'explanation'>('visual')
   const [selectedNode, setSelectedNode] = useState<{ type: 'provider' | 'pool' | 'model'; data: any } | null>(null)
   
@@ -157,7 +157,7 @@ export default function QuotaPoolsPage() {
   const { data: pools = [] } = useQuery<QuotaPool[]>({
     queryKey: ['quota-pools'],
     queryFn: () => apiFetch<QuotaPool[]>('/api/providers/quota-pools'),
-    refetchInterval: autoRefresh ? 30000 : false, // 30s if enabled, else manual only
+    refetchInterval: autoRefresh ? 30000 : false,
   })
 
   const syncMutation = useMutation({
@@ -180,7 +180,7 @@ export default function QuotaPoolsPage() {
     }
   }, [mermaidMarkdown, customMermaidCode])
 
-  // Stable Mermaid Graph Renderer (Only re-renders if diagram code actually changed)
+  // Stable Mermaid Graph Renderer
   useEffect(() => {
     if (activeTab !== 'graph' || !mermaidRef.current || pools.length === 0) return
     if (lastRenderedCodeRef.current === mermaidMarkdown) return
@@ -224,9 +224,7 @@ export default function QuotaPoolsPage() {
 
   const copyMermaidCode = () => {
     navigator.clipboard.writeText(customMermaidCode || mermaidMarkdown)
-    setCopied(true)
     toast.success('Mermaid code copied to clipboard!')
-    setTimeout(() => setCopied(false), 2000)
   }
 
   const filteredPools = useMemo(() => {
@@ -255,232 +253,211 @@ export default function QuotaPoolsPage() {
   }, [pools])
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/70 p-6 sm:p-8 shadow-2xl">
-        <div className="absolute -right-12 -top-12 size-64 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute -left-12 -bottom-12 size-64 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-400 backdrop-blur">
-              <Zap className="size-3.5 animate-pulse text-blue-400" />
-              Dynamic Pool Routing & Deterioration Detection Engine
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-100 sm:text-4xl">
-              Quota Pools & Model Health Inspector
-            </h1>
-            <p className="max-w-2xl text-sm text-slate-400">
-              FreeLLMAPI dynamically tracks provider rate-limit pools and detects model health degradation in real-time. Unusable or cooling-down models are automatically isolated while traffic routes smoothly through healthy pool members.
-            </p>
-          </div>
+    <div className="space-y-6">
+      {/* Integrated Native Page Header */}
+      <PageHeader
+        title="Quota Pools & Routing"
+        description="Monitor provider quota pools, track rate-limit statuses, and inspect multi-armed bandit penalties in real-time."
+        divider={false}
+        actions={<ModelsTabs />}
+      />
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                autoRefresh
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Clock className="size-3.5" />
-              {autoRefresh ? 'Auto-Refresh (30s)' : 'Auto-Refresh Off'}
-            </button>
-            <button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className={buttonVariants({ variant: 'default', size: 'sm' })}
-            >
-              <RefreshCw className={`mr-2 size-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-              {syncMutation.isPending ? 'Syncing...' : 'Sync Provider Models'}
-            </button>
-            <button
-              onClick={copyMermaidCode}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {copied ? <Check className="mr-2 size-4 text-emerald-400" /> : <Copy className="mr-2 size-4" />}
-              {copied ? 'Copied!' : 'Copy Mermaid Code'}
-            </button>
+      {/* Top Health Analytics strip matching rest of UI dashboard layout */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="flex items-center gap-3 rounded-2xl border bg-card p-4">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
+            <CheckCircle2 className="size-5" />
+          </div>
+          <div>
+            <div className="text-lg font-semibold text-foreground">{healthStats.healthy}</div>
+            <div className="text-[11px] text-muted-foreground">Healthy Models</div>
           </div>
         </div>
 
-        {/* Health State Metrics Strip */}
-        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-slate-800/80 pt-6 sm:grid-cols-4">
-          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
-              <CheckCircle2 className="size-5" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-emerald-300">{healthStats.healthy}</div>
-              <div className="text-[11px] text-slate-400">Healthy Models</div>
-            </div>
+        <div className="flex items-center gap-3 rounded-2xl border bg-card p-4">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
+            <Clock className="size-5" />
           </div>
-
-          <div className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-950/20 p-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
-              <Clock className="size-5" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-amber-300">{healthStats.cooling}</div>
-              <div className="text-[11px] text-slate-400">Cooling Down (429)</div>
-            </div>
+          <div>
+            <div className="text-lg font-semibold text-foreground">{healthStats.cooling}</div>
+            <div className="text-[11px] text-muted-foreground">Cooling Down (429)</div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-950/20 p-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
-              <AlertCircle className="size-5" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-rose-300">{healthStats.degraded}</div>
-              <div className="text-[11px] text-slate-400">Degraded / Penalized</div>
-            </div>
+        <div className="flex items-center gap-3 rounded-2xl border bg-card p-4">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+            <AlertCircle className="size-5" />
           </div>
+          <div>
+            <div className="text-lg font-semibold text-foreground">{healthStats.degraded}</div>
+            <div className="text-[11px] text-muted-foreground">Degraded / Penalized</div>
+          </div>
+        </div>
 
-          <div className="flex items-center gap-3 rounded-xl border border-slate-700/40 bg-slate-900/40 p-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-slate-800 text-slate-400">
-              <Cpu className="size-5" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-slate-300">{totalModelsCount}</div>
-              <div className="text-[11px] text-slate-400">Total Models in {pools.length} Pools</div>
-            </div>
+        <div className="flex items-center gap-3 rounded-2xl border bg-card p-4">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <Cpu className="size-5" />
+          </div>
+          <div>
+            <div className="text-lg font-semibold text-foreground">{totalModelsCount}</div>
+            <div className="text-[11px] text-muted-foreground">Total Models</div>
           </div>
         </div>
       </div>
 
-      {/* Navigation Tab Bar */}
+      {/* Sub Toolbar & View Controls */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap rounded-lg border border-slate-800 bg-slate-900/80 p-1 backdrop-blur">
+        <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border p-1 bg-muted/40">
           <button
             onClick={() => setActiveTab('visual')}
-            className={`flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
               activeTab === 'visual'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
-            <Activity className="size-3.5" />
-            Interactive Graph Compiler & Visualizer
+            <Activity className="mr-1.5 inline size-3.5" />
+            Interactive Network
           </button>
 
           <button
             onClick={() => setActiveTab('graph')}
-            className={`flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
               activeTab === 'graph'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
-            <Network className="size-3.5" />
+            <Network className="mr-1.5 inline size-3.5" />
             Mermaid Topology
           </button>
 
           <button
             onClick={() => setActiveTab('compiler')}
-            className={`flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
               activeTab === 'compiler'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
-            <Code2 className="size-3.5" />
-            Live Mermaid Compiler
+            <Code2 className="mr-1.5 inline size-3.5" />
+            Mermaid Compiler
           </button>
 
           <button
             onClick={() => setActiveTab('cards')}
-            className={`flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
               activeTab === 'cards'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
-            <Layers className="size-3.5" />
-            Pools & Models ({filteredPools.length})
+            <Layers className="mr-1.5 inline size-3.5" />
+            Pools list
           </button>
 
           <button
             onClick={() => setActiveTab('explanation')}
-            className={`flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
               activeTab === 'explanation'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
-            <Info className="size-3.5" />
-            How Detection Engine Works
+            <Info className="mr-1.5 inline size-3.5" />
+            Engine Architecture
           </button>
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Filter models or pools..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-slate-800 bg-slate-900/80 pl-9 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search pools or models..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-9 w-56 rounded-lg border bg-background pl-9 pr-4 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+
+          <Tooltip text="Manually trigger background model sync and discovery process">
+            <button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="inline-flex size-9 items-center justify-center rounded-lg border bg-background hover:bg-muted transition text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={`size-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            </button>
+          </Tooltip>
+
+          <button
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`h-9 px-3 rounded-lg border text-xs font-medium transition-colors ${
+              autoRefresh ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-background hover:bg-muted text-muted-foreground'
+            }`}
+          >
+            {autoRefresh ? 'Auto-Refresh: On' : 'Auto-Refresh: Off'}
+          </button>
         </div>
       </div>
 
-      {/* TAB 1: Real Interactive Canvas & Node Visualizer */}
+      {/* Main View Area */}
       {activeTab === 'visual' && (
         <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800/80 pb-4">
+          {/* Visual Canvas Block */}
+          <div className="lg:col-span-2 rounded-3xl border bg-card p-5">
+            <div className="flex items-center justify-between border-b pb-4 mb-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-100">Live Quota Pool Network & Health State</h3>
-                <p className="text-xs text-slate-400">Click any provider or model node to inspect its real-time rate limits, penalty score, and error logs.</p>
+                <h2 className="text-sm font-medium">Pool Routing Visualization</h2>
+                <p className="text-xs text-muted-foreground">Select nodes to view error telemetry and rate limit logs.</p>
               </div>
 
               <button
                 onClick={() => setAnimating(!animating)}
-                className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300 transition hover:bg-slate-800"
+                className="flex items-center gap-1.5 rounded-lg border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition"
               >
-                {animating ? <Pause className="size-3.5 text-amber-400" /> : <Play className="size-3.5 text-emerald-400" />}
+                {animating ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
                 {animating ? 'Pause Flow' : 'Play Flow'}
               </button>
             </div>
 
-            {/* Interactive Visual Graph Canvas */}
-            <div className="relative min-h-[520px] overflow-y-auto space-y-6 pr-2">
-              {/* Router Origin */}
+            <div className="space-y-6">
+              {/* Router Node */}
               <div className="flex justify-center">
                 <div 
                   onClick={() => setSelectedNode({ type: 'provider', data: { name: 'FreeLLMAPI Router', type: 'Router Core' } })}
-                  className="cursor-pointer flex items-center gap-2 rounded-xl border border-indigo-500/50 bg-gradient-to-r from-indigo-950 to-slate-900 px-6 py-3 shadow-lg hover:border-indigo-400 transition"
+                  className="cursor-pointer flex items-center gap-2.5 rounded-xl border bg-muted/65 px-5 py-3 hover:bg-muted transition shadow-sm"
                 >
-                  <Zap className="size-5 text-indigo-400 animate-pulse" />
+                  <Zap className="size-4.5 text-indigo-500" />
                   <div>
-                    <div className="text-xs font-bold text-indigo-200">⚡ FreeLLMAPI Unified Router</div>
-                    <div className="text-[10px] text-indigo-400">Multi-Armed Bandit + Dynamic Quota Pool Balancer</div>
+                    <div className="text-xs font-semibold text-foreground">FreeLLMAPI Unified Router</div>
+                    <div className="text-[10px] text-muted-foreground">Multi-Armed Bandit Routing</div>
                   </div>
                 </div>
               </div>
 
-              {/* Provider & Model Clusters */}
+              {/* Grouped Pools */}
               <div className="space-y-4">
                 {filteredPools.map((pool) => (
-                  <div key={pool.poolKey} className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-4">
+                  <div key={pool.poolKey} className="rounded-2xl border bg-muted/20 p-4">
                     <div 
                       onClick={() => setSelectedNode({ type: 'pool', data: pool })}
-                      className="flex cursor-pointer items-center justify-between border-b border-slate-800/60 pb-3"
+                      className="flex cursor-pointer items-center justify-between border-b pb-2 mb-3"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="flex size-2 rounded-full bg-emerald-400" />
-                        <span className="font-mono text-xs font-bold text-slate-200">{pool.providerDisplayName}</span>
-                        <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-slate-400">{pool.poolKey}</span>
+                        <span className="flex size-2 rounded-full bg-emerald-500" />
+                        <span className="text-xs font-semibold text-foreground">{pool.providerDisplayName}</span>
+                        <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">{pool.poolKey}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                      <div className="text-[10px] text-muted-foreground flex items-center gap-1">
                         <span>{pool.models.length} Models Pooled</span>
-                        <ChevronRight className="size-3.5 text-slate-500" />
+                        <ChevronRight className="size-3.5 text-muted-foreground" />
                       </div>
                     </div>
 
-                    {/* Pooled Models Cards Grid */}
-                    <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    {/* Pooled Models Grid */}
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {pool.models.map((m) => {
                         const isHealthy = m.healthStatus === 'healthy'
                         const isCooling = m.healthStatus === 'cooling_down'
@@ -490,33 +467,33 @@ export default function QuotaPoolsPage() {
                           <div
                             key={m.id}
                             onClick={() => setSelectedNode({ type: 'model', data: { model: m, pool } })}
-                            className={`group relative flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-all hover:scale-[1.01] ${
+                            className={`group flex cursor-pointer items-center justify-between rounded-xl border bg-card p-3 transition-colors hover:bg-muted/40 ${
                               isHealthy
-                                ? 'border-emerald-500/30 bg-emerald-950/10 hover:border-emerald-500/60'
+                                ? 'border-emerald-500/20'
                                 : isCooling
-                                ? 'border-amber-500/40 bg-amber-950/20 hover:border-amber-500/70'
+                                ? 'border-amber-500/20 bg-amber-500/5'
                                 : isDegraded
-                                ? 'border-rose-500/40 bg-rose-950/20 hover:border-rose-500/70'
-                                : 'border-slate-800 bg-slate-900/50 opacity-60'
+                                ? 'border-destructive/20 bg-destructive/5'
+                                : 'opacity-60'
                             }`}
                           >
                             <div className="flex items-center gap-2">
                               <span className={`size-2 rounded-full ${
-                                isHealthy ? 'bg-emerald-400 animate-pulse' : isCooling ? 'bg-amber-400 animate-ping' : isDegraded ? 'bg-rose-500' : 'bg-slate-600'
+                                isHealthy ? 'bg-emerald-500' : isCooling ? 'bg-amber-500 animate-pulse' : isDegraded ? 'bg-destructive' : 'bg-muted-foreground'
                               }`} />
                               <div>
-                                <div className="text-xs font-medium text-slate-200 group-hover:text-white">
+                                <div className="text-xs font-medium text-foreground">
                                   {m.displayName || m.modelId}
                                 </div>
-                                <div className="text-[10px] text-slate-400">
-                                  {isHealthy ? 'Routable & Healthy' : isCooling ? `Cooling down (${Math.round((m.cooldownExpiresInMs ?? 0)/1000)}s)` : isDegraded ? `Penalized (${m.penaltyHits} hits)` : 'Disabled'}
+                                <div className="text-[10px] text-muted-foreground">
+                                  {isHealthy ? 'Routable & Healthy' : isCooling ? `Cooling down (${Math.round((m.cooldownExpiresInMs ?? 0)/1000)}s)` : isDegraded ? `Degraded (${m.penaltyHits} hits)` : 'Disabled'}
                                 </div>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1">
-                              {m.supportsVision && <span title="Vision Capable"><Eye className="size-3 text-blue-400" /></span>}
-                              {m.supportsTools && <span title="Tool Calling Capable"><Wrench className="size-3 text-emerald-400" /></span>}
+                            <div className="flex items-center gap-1 opacity-70">
+                              {m.supportsVision && <Eye className="size-3 text-muted-foreground" />}
+                              {m.supportsTools && <Wrench className="size-3 text-muted-foreground" />}
                             </div>
                           </div>
                         )
@@ -528,51 +505,52 @@ export default function QuotaPoolsPage() {
             </div>
           </div>
 
-          {/* Node Inspector Side Panel */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
-            <h3 className="mb-4 text-sm font-semibold text-slate-100 flex items-center gap-2">
-              <Sliders className="size-4 text-blue-400" />
-              Node Inspector & Diagnostics
-            </h3>
+          {/* Inspector Panel Block */}
+          <div className="rounded-3xl border bg-card p-5">
+            <h2 className="text-sm font-medium mb-4 flex items-center gap-2">
+              <Sliders className="size-4 text-muted-foreground" />
+              Node Inspector
+            </h2>
 
             {selectedNode ? (
               <div className="space-y-4 text-xs">
                 {selectedNode.type === 'model' && (
                   <div className="space-y-3">
-                    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                      <div className="font-bold text-slate-100 text-sm">{selectedNode.data.model.displayName}</div>
-                      <div className="font-mono text-slate-400 text-[10px]">{selectedNode.data.model.modelId}</div>
-                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{
-                        backgroundColor: selectedNode.data.model.healthStatus === 'healthy' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                        color: selectedNode.data.model.healthStatus === 'healthy' ? '#34d399' : '#fbbf24',
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="font-semibold text-foreground text-sm">{selectedNode.data.model.displayName}</div>
+                      <div className="font-mono text-muted-foreground text-[10px]">{selectedNode.data.model.modelId}</div>
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-medium border uppercase" style={{
+                        borderColor: selectedNode.data.model.healthStatus === 'healthy' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                        color: selectedNode.data.model.healthStatus === 'healthy' ? '#10b981' : '#f59e0b',
+                        backgroundColor: selectedNode.data.model.healthStatus === 'healthy' ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)',
                       }}>
                         {selectedNode.data.model.healthStatus}
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-                      <div className="font-semibold text-slate-300">Penalty & Multi-Armed Bandit Factor</div>
-                      <div className="flex justify-between text-slate-400">
+                    <div className="rounded-xl border p-3 space-y-2">
+                      <div className="font-semibold text-foreground">Score & Penalties</div>
+                      <div className="flex justify-between text-muted-foreground">
                         <span>Penalty Hits:</span>
-                        <span className="font-mono font-bold text-slate-200">{selectedNode.data.model.penaltyHits}</span>
+                        <span className="font-mono text-foreground font-medium">{selectedNode.data.model.penaltyHits}</span>
                       </div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>Rate Limit Score Multiplier:</span>
-                        <span className="font-mono font-bold text-slate-200">{selectedNode.data.model.penaltyFactor.toFixed(3)}</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Score Decay Multiplier:</span>
+                        <span className="font-mono text-foreground font-medium">{selectedNode.data.model.penaltyFactor.toFixed(3)}</span>
                       </div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>Context Window:</span>
-                        <span className="font-mono font-bold text-slate-200">{selectedNode.data.model.contextWindow ? `${selectedNode.data.model.contextWindow.toLocaleString()} tokens` : 'Standard'}</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Context limit:</span>
+                        <span className="font-mono text-foreground font-medium">{selectedNode.data.model.contextWindow ? `${selectedNode.data.model.contextWindow.toLocaleString()} ctx` : 'Standard'}</span>
                       </div>
                     </div>
 
                     {selectedNode.data.model.recentErrors?.length > 0 && (
-                      <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3 space-y-2">
-                        <div className="font-semibold text-rose-300 flex items-center gap-1">
-                          <AlertCircle className="size-3.5" /> Recent Diagnostic Logs
+                      <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 space-y-2">
+                        <div className="font-semibold text-destructive flex items-center gap-1">
+                          <AlertCircle className="size-3.5" /> Recent Errors
                         </div>
                         {selectedNode.data.model.recentErrors.map((err: any, idx: number) => (
-                          <div key={idx} className="font-mono text-[10px] text-rose-400 border-t border-rose-900/40 pt-1.5">
+                          <div key={idx} className="font-mono text-[10px] text-destructive border-t border-destructive/10 pt-1.5">
                             {err.error}
                           </div>
                         ))}
@@ -583,70 +561,68 @@ export default function QuotaPoolsPage() {
 
                 {selectedNode.type === 'pool' && (
                   <div className="space-y-3">
-                    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                      <div className="font-bold text-slate-100 text-sm">{selectedNode.data.providerDisplayName}</div>
-                      <div className="font-mono text-emerald-400 text-xs mt-1">{selectedNode.data.poolKey}</div>
+                    <div className="rounded-xl border bg-muted/40 p-4">
+                      <div className="font-semibold text-foreground text-sm">{selectedNode.data.providerDisplayName}</div>
+                      <div className="font-mono text-emerald-500 text-[10px] mt-1">{selectedNode.data.poolKey}</div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-                      <div className="font-semibold text-slate-300">Pool Telemetry</div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>Connected Keys:</span>
-                        <span className="font-mono text-slate-200">{selectedNode.data.activeKeyCount}</span>
+                    <div className="rounded-xl border p-3 space-y-2">
+                      <div className="font-semibold text-foreground">Quota Pool Stats</div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Keys:</span>
+                        <span className="font-mono text-foreground">{selectedNode.data.activeKeyCount}</span>
                       </div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>Total Pooled Models:</span>
-                        <span className="font-mono text-slate-200">{selectedNode.data.models.length}</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Models:</span>
+                        <span className="font-mono text-foreground">{selectedNode.data.models.length}</span>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex h-64 flex-col items-center justify-center text-center text-slate-500">
-                <Sparkles className="mb-2 size-8 text-slate-600" />
-                <p className="text-xs">Click any model card or provider pool on the left to inspect its live health telemetry and penalty state.</p>
+              <div className="flex h-64 flex-col items-center justify-center text-center text-muted-foreground border border-dashed rounded-2xl">
+                <Sparkles className="mb-2 size-6 text-muted-foreground/60" />
+                <p className="text-xs max-w-[200px]">Select any card node to run health inspect.</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* TAB 2: Stable Mermaid Topology */}
+      {/* TAB 2: Mermaid Graph Rendering */}
       {activeTab === 'graph' && (
-        <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
-          <div className="mb-4 flex items-center justify-between border-b border-slate-800/80 pb-4">
+        <section className="rounded-3xl border bg-card p-5">
+          <div className="flex items-center justify-between border-b pb-4 mb-4">
             <div>
-              <h3 className="text-sm font-semibold text-slate-100">Mermaid System Flowchart (Stable Render)</h3>
-              <p className="text-xs text-slate-400">Renders topology cleanly without unnecessary periodic page updates.</p>
+              <h2 className="text-sm font-medium">Mermaid Topology Definition</h2>
+              <p className="text-xs text-muted-foreground">Graph visualization showing router distribution layers.</p>
             </div>
             <button
               onClick={copyMermaidCode}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Copy className="mr-2 size-4" /> Copy Mermaid Syntax
+              <Copy className="size-3.5" /> Copy Code
             </button>
           </div>
 
-          <div className="min-h-[450px] w-full overflow-x-auto p-4 flex justify-center">
+          <div className="flex justify-center overflow-x-auto py-6 bg-slate-950 rounded-2xl">
             <div ref={mermaidRef} className="mermaid-chart" />
           </div>
-        </div>
+        </section>
       )}
 
-      {/* TAB 3: Interactive Live Mermaid Code Compiler */}
+      {/* TAB 3: Mermaid Interactive Compiler */}
       {activeTab === 'compiler' && (
         <div className="grid gap-6 lg:grid-cols-2">
-          <div className="flex flex-col rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                <Code2 className="size-4 text-blue-400" /> Mermaid Live Compiler Source
-              </h3>
+          <section className="rounded-3xl border bg-card p-5 flex flex-col">
+            <div className="flex items-center justify-between border-b pb-4 mb-4">
+              <h2 className="text-sm font-medium">Compiler Source</h2>
               <button
                 onClick={() => compileCustomMermaid(customMermaidCode)}
-                className={buttonVariants({ variant: 'default', size: 'sm' })}
+                className="h-8 rounded-lg bg-foreground text-background px-3 text-xs font-medium hover:opacity-90 transition-opacity"
               >
-                Compile Graph
+                Compile Code
               </button>
             </div>
 
@@ -656,48 +632,45 @@ export default function QuotaPoolsPage() {
                 setCustomMermaidCode(e.target.value)
                 compileCustomMermaid(e.target.value)
               }}
-              rows={18}
-              className="w-full flex-1 rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-xs text-blue-300 focus:border-blue-500 focus:outline-none"
+              rows={16}
+              className="w-full flex-1 rounded-xl border bg-background p-4 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
 
             {compilerError && (
-              <div className="mt-3 rounded-lg border border-rose-900/50 bg-rose-950/30 p-3 font-mono text-xs text-rose-400">
-                ⚠️ Compiler Error: {compilerError}
+              <div className="mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3 font-mono text-xs text-destructive">
+                Syntax Error: {compilerError}
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
-            <h3 className="mb-4 border-b border-slate-800 pb-3 text-sm font-semibold text-slate-100">
-              Compiled SVG Preview Output
-            </h3>
+          <section className="rounded-3xl border bg-card p-5">
+            <h2 className="text-sm font-medium border-b pb-4 mb-4">Compiled SVG Preview</h2>
             <div 
-              className="mermaid-chart flex justify-center overflow-x-auto"
+              className="mermaid-chart flex justify-center overflow-x-auto py-6 bg-slate-950 rounded-2xl"
               dangerouslySetInnerHTML={{ __html: compilerSvg }}
             />
-          </div>
+          </section>
         </div>
       )}
 
-      {/* TAB 4: Quota Pool Cards */}
+      {/* TAB 4: Pools list cards */}
       {activeTab === 'cards' && (
         <div className="grid gap-6 md:grid-cols-2">
           {filteredPools.map((pool) => (
             <div
               key={pool.poolKey}
-              className="flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-6 backdrop-blur"
+              className="rounded-3xl border bg-card p-6 flex flex-col justify-between"
             >
               <div className="space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-[10px] font-semibold text-slate-300">
+                    <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                       {pool.providerDisplayName}
                     </span>
-                    <h3 className="mt-1 font-mono text-base font-bold text-slate-100">{pool.poolKey}</h3>
+                    <h3 className="mt-1.5 font-mono text-base font-bold text-foreground">{pool.poolKey}</h3>
                   </div>
-                  <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                    <CheckCircle2 className="size-3.5" />
-                    {pool.activeKeyCount > 0 ? `${pool.activeKeyCount} Active Keys` : 'Shared Pool'}
+                  <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                    {pool.activeKeyCount} Keys
                   </span>
                 </div>
 
@@ -705,10 +678,10 @@ export default function QuotaPoolsPage() {
                   {pool.models.map((m) => (
                     <div
                       key={m.id}
-                      className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-800/50 px-2.5 py-1 text-xs text-slate-300"
+                      className="flex items-center gap-1.5 rounded-lg border bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground"
                     >
                       <span className={`size-1.5 rounded-full ${
-                        m.healthStatus === 'healthy' ? 'bg-emerald-400' : m.healthStatus === 'cooling_down' ? 'bg-amber-400' : 'bg-rose-500'
+                        m.healthStatus === 'healthy' ? 'bg-emerald-500' : m.healthStatus === 'cooling_down' ? 'bg-amber-500' : 'bg-destructive'
                       }`} />
                       <span>{m.displayName || m.modelId}</span>
                     </div>
@@ -720,38 +693,30 @@ export default function QuotaPoolsPage() {
         </div>
       )}
 
-      {/* TAB 5: Technical Architecture & Deterioration Detection Explanation */}
+      {/* TAB 5: Technical Details */}
       {activeTab === 'explanation' && (
-        <div className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl text-slate-300">
-          <h2 className="text-lg font-bold text-slate-100 border-b border-slate-800 pb-3 flex items-center gap-2">
-            <ShieldCheck className="size-5 text-emerald-400" />
-            FreeLLMAPI Provider Pool & Model Deterioration Engine Architecture
+        <section className="rounded-3xl border bg-card p-6 space-y-6 text-slate-300 text-xs leading-relaxed">
+          <h2 className="text-base font-semibold text-foreground border-b pb-3 flex items-center gap-2">
+            <ShieldCheck className="size-5 text-emerald-500" />
+            Detection & Quota Management Engine
           </h2>
 
-          <div className="grid gap-6 md:grid-cols-2 text-xs leading-relaxed">
-            <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-              <h3 className="text-sm font-semibold text-blue-400">1. How Provider Quota Pools Are Managed</h3>
-              <p>
-                Upstream providers (such as Groq, Google, NVIDIA, OpenRouter, Cerebras, and Ollama) enforce rate limit buckets either per account key or across shared project pools.
-              </p>
-              <p>
-                FreeLLMAPI uses <code className="font-mono text-emerald-400">inferQuotaPoolKey(platform, modelId)</code> to group all models that share the same underlying token/request pool. When any model in a pool receives rate-limit headers (e.g. <code className="font-mono text-slate-300">x-ratelimit-remaining-requests: 0</code> or <code className="font-mono text-slate-300">retry-after: 30</code>), the router marks the entire pool as cooling down.
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
+              <h3 className="text-sm font-semibold text-indigo-400">1. Quota Pool Routing</h3>
+              <p className="text-muted-foreground">
+                Upstream platforms restrict usage limits across shared project pools or individual accounts. FreeLLMAPI maps shared resources using <code className="font-mono text-emerald-500">inferQuotaPoolKey(platform, modelId)</code>. Any rate-limit header response (e.g. 429 Retry-After) temporarily halts routing to all models in that pool.
               </p>
             </div>
 
-            <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-              <h3 className="text-sm font-semibold text-amber-400">2. How Deteriorating Models Are Detected</h3>
-              <p>
-                The Multi-Armed Bandit Scoring Engine (<code className="font-mono text-slate-300">scoring.ts</code>) continuously evaluates model health across three axes:
+            <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
+              <h3 className="text-sm font-semibold text-amber-400">2. Deterioration Detection</h3>
+              <p className="text-muted-foreground">
+                The router scoring engine penalizes models on recurrent 5xx or DNS timeouts, decaying routing scores dynamically. Proactive background checker loops probe keys every 5 minutes to quarantine invalid credentials instantly.
               </p>
-              <ul className="list-disc space-y-1 pl-4 text-slate-400">
-                <li><strong className="text-slate-200">Penalty Decay Factor:</strong> Consecutive 5xx or transport timeouts increase a model&apos;s penalty hits, decaying its score exponentially.</li>
-                <li><strong className="text-slate-200">Automatic Circuit Breaker:</strong> The health worker checks keys every 5 minutes (<code className="font-mono text-slate-300">checkKeyHealth</code>). If a key fails 3 consecutive validation probes, it is auto-disabled.</li>
-                <li><strong className="text-slate-200">Failover Rerouting:</strong> Deteriorated or cooling-down models are bypassed instantly in favor of healthy pool candidates.</li>
-              </ul>
             </div>
           </div>
-        </div>
+        </section>
       )}
     </div>
   )
