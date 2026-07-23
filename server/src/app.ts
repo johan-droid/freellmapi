@@ -66,9 +66,18 @@ export function createApp(config?: Config) {
   // a single-user local proxy, served over HTTP on localhost. Both should
   // stay disabled unless someone serves the proxy over HTTPS publicly
   // (which is also not a supported deployment — see README).
-  app.use(helmet({ contentSecurityPolicy: false, hsts: false }));
+  // When TLS is configured, HSTS is enabled to enforce HTTPS.
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    hsts: cfg.tls ? { maxAge: 31536000, includeSubDomains: false } : false,
+  }));
   app.use(cors({
     origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+      // When requireOrigin is true, requests without an Origin header are rejected.
+      if (cfg.requireOrigin && !origin) {
+        callback(null, false);
+        return;
+      }
       callback(null, !origin || allowedCorsOrigins.has(origin));
     },
   }));

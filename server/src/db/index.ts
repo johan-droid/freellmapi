@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'url';
 import { resolveDefaultDbPath } from '../env.js';
 import { runMigrationsSync } from './migrate/runner.js';
-import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
+import { initEncryptionKey, isEncryptionKeyInitialized, encrypt, decrypt } from '../lib/crypto.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
 import type { Db, DbFactory } from './types.js';
@@ -103,16 +103,58 @@ export function initDb(
   return db;
 }
 
+const UNIFIED_KEY_SETTING = 'unified_api_key';
+const UNIFIED_KEY_ENCRYPTED = 'unified_api_key.encrypted';
+const UNIFIED_KEY_IV = 'unified_api_key.iv';
+const UNIFIED_KEY_AUTH_TAG = 'unified_api_key.auth_tag';
+
 export function getUnifiedApiKey(): string {
   const db = getDb();
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'unified_api_key'").get() as { value: string };
-  return row.value;
+
+  // Try the encrypted form first.
+  const encrypted = db.prepare("SELECT value FROM settings WHERE key = ?").get(UNIFIED_KEY_ENCRYPTED) as { value: string } | undefined;
+  const iv = db.prepare("SELECT value FROM settings WHERE key = ?").get(UNIFIED_KEY_IV) as { value: string } | undefined;
+  const authTag = db.prepare("SELECT value FROM settings WHERE key = ?").get(UNIFIED_KEY_AUTH_TAG) as { value: string } | undefined;
+  if (encrypted && iv && authTag) {
+    try {
+      return decrypt(encrypted.value, iv.value, authTag.value);
+    } catch {
+      console.error('[db] Failed to decrypt unified API key — falling back to plaintext');
+    }
+  }
+
+  // Legacy plaintext fallback: migrate to encrypted on first access.
+  const plain = db.prepare("SELECT value FROM settings WHERE key = ?").get(UNIFIED_KEY_SETTING) as { value: string } | undefined;
+  if (plain) {
+    const migratedKey = plain.value;
+    if (isEncryptionKeyInitialized()) {
+      const { encrypted: enc, iv: encIv, authTag: encAuthTag } = encrypt(migratedKey);
+      const upsert = db.transaction(() => {
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_ENCRYPTED, enc);
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_IV, encIv);
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_AUTH_TAG, encAuthTag);
+        db.prepare("DELETE FROM settings WHERE key = ?").run(UNIFIED_KEY_SETTING);
+      });
+      upsert();
+      scheduleHydrateSecretsToRemote(db);
+    }
+    return migratedKey;
+  }
+
+  throw new Error('Unified API key not found. Re-initialize the database or regenerate the key via the dashboard.');
 }
 
 export function regenerateUnifiedKey(): string {
   const db = getDb();
   const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'unified_api_key'").run(key);
+  const { encrypted: enc, iv, authTag } = encrypt(key);
+  const upsert = db.transaction(() => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_ENCRYPTED, enc);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_IV, iv);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(UNIFIED_KEY_AUTH_TAG, authTag);
+    db.prepare("DELETE FROM settings WHERE key = ?").run(UNIFIED_KEY_SETTING);
+  });
+  upsert();
   scheduleHydrateSecretsToRemote(db);
   return key;
 }

@@ -2,6 +2,9 @@ import './env.js';
 import { installLogRedaction } from './lib/redact.js';
 installLogRedaction();
 
+import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import { createApp } from './app.js';
 import { initDb, getDb, getSetting } from './db/index.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
@@ -67,10 +70,12 @@ async function main() {
 
   const app = createApp(config);
 
+  const protocol = config.tls ? 'https' : 'http';
+
   const onReady = (host: string) => () => {
     const display = host.includes(':') ? `[${host}]` : host;
-    console.log(`Server running on http://${display}:${PORT}`);
-    console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);
+    console.log(`Server running on ${protocol}://${display}:${PORT}`);
+    console.log(`Proxy endpoint: ${protocol}://${display}:${PORT}/v1/chat/completions`);
     startHealthChecker(scheduler);
     startCatalogSync(scheduler);
     startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
@@ -95,7 +100,16 @@ async function main() {
     });
   };
 
-  const server = app.listen(Number(PORT), HOST, onReady(HOST));
+  const tlsOptions = config.tls
+    ? { cert: fs.readFileSync(config.tls.certPath), key: fs.readFileSync(config.tls.keyPath) }
+    : null;
+  let server: http.Server | https.Server;
+  if (tlsOptions) {
+    server = https.createServer(tlsOptions, app).listen(Number(PORT), HOST, onReady(HOST));
+  } else {
+    server = app.listen(Number(PORT), HOST, onReady(HOST));
+  }
+
   server.on('close', stopSnapshots);
   server.on('error', (err: NodeJS.ErrnoException) => {
     // The default '::' bind fails where IPv6 is disabled (kernel
@@ -104,7 +118,11 @@ async function main() {
     // fail-fast posture documented in main().catch below.
     if (!process.env.HOST && (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL')) {
       console.warn('[server] IPv6 unavailable on this host — falling back to 0.0.0.0 (IPv4-only)');
-      app.listen(Number(PORT), '0.0.0.0', onReady('0.0.0.0'));
+      if (tlsOptions) {
+        server = https.createServer(tlsOptions, app).listen(Number(PORT), '0.0.0.0', onReady('0.0.0.0'));
+      } else {
+        server = app.listen(Number(PORT), '0.0.0.0', onReady('0.0.0.0'));
+      }
       return;
     }
     console.error('\n[server] Failed to start:\n  ' + (err?.message ?? err) + '\n');

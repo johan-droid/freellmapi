@@ -54,7 +54,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
   }
 
   const script = `
-    import { Pool } from 'pg';
+    import { Pool, escapeIdentifier } from 'pg';
 
     const action = process.argv[1];
     const env = process.env;
@@ -130,7 +130,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
           "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'api_keys' AND con.contype = 'c'"
         );
         for (const row of checkConstraints.rows) {
-          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + row.conname);
+          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + escapeIdentifier(row.conname));
         }
       } catch (e) {
         // ignore
@@ -141,7 +141,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
           "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'provider_accounts' AND con.contype = 'c'"
         );
         for (const row of checkConstraintsPA.rows) {
-          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + row.conname);
+          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + escapeIdentifier(row.conname));
         }
       } catch (e) {
         // ignore
@@ -256,7 +256,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, action], {
     input: payload ? JSON.stringify(payload) : '',
     encoding: 'utf8',
-    env: process.env,
+    env: { DATABASE_URL: process.env.DATABASE_URL ?? '', DATABASE_SSL: process.env.DATABASE_SSL ?? '' },
     maxBuffer: 10 * 1024 * 1024,
     timeout: 30000,
   });
@@ -277,7 +277,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
   }
 
   const script = `
-    import { Pool } from 'pg';
+    import { Pool, escapeIdentifier } from 'pg';
 
     const action = process.argv[1];
     const env = process.env;
@@ -353,7 +353,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
           "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'api_keys' AND con.contype = 'c'"
         );
         for (const row of checkConstraints.rows) {
-          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + row.conname);
+          await pool.query('ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS ' + escapeIdentifier(row.conname));
         }
       } catch (e) {
         // ignore
@@ -364,7 +364,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
           "SELECT conname FROM pg_constraint con INNER JOIN pg_class rel ON rel.oid = con.conrelid INNER JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace WHERE nsp.nspname = 'public' AND rel.relname = 'provider_accounts' AND con.contype = 'c'"
         );
         for (const row of checkConstraintsPA.rows) {
-          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + row.conname);
+          await pool.query('ALTER TABLE provider_accounts DROP CONSTRAINT IF EXISTS ' + escapeIdentifier(row.conname));
         }
       } catch (e) {
         // ignore
@@ -477,7 +477,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
   `;
 
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, action], {
-    env: process.env,
+    env: { DATABASE_URL: process.env.DATABASE_URL ?? '', DATABASE_SSL: process.env.DATABASE_SSL ?? '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

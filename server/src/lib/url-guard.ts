@@ -37,7 +37,7 @@ import net from 'node:net';
 
 export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'public';
 
-const METADATA_HOSTNAMES = new Set([
+export const METADATA_HOSTNAMES = new Set([
   'metadata.google.internal',
   'metadata.goog',
 ]);

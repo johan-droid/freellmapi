@@ -8,6 +8,11 @@ function parseRateLimitRpm(): number {
   return Math.floor(n);
 }
 
+export interface TlsConfig {
+  certPath: string;
+  keyPath: string;
+}
+
 export interface Config {
   port: number | string;
   host: string;
@@ -17,6 +22,19 @@ export interface Config {
   proxyRateLimitRpm: number;
   nodeEnv: string;
   serveStaticAssets: boolean;
+  tls: TlsConfig | null;
+  requireOrigin: boolean;
+}
+
+function parseOptionalTls(): TlsConfig | null {
+  const certPath = process.env.TLS_CERT_PATH?.trim();
+  const keyPath = process.env.TLS_KEY_PATH?.trim();
+  if (!certPath && !keyPath) return null;
+  if (!certPath || !keyPath) {
+    console.warn('[config] Both TLS_CERT_PATH and TLS_KEY_PATH must be set for HTTPS — falling back to HTTP');
+    return null;
+  }
+  return { certPath, keyPath };
 }
 
 export function loadConfig(): Config {
@@ -38,5 +56,7 @@ export function loadConfig(): Config {
     proxyRateLimitRpm: parseRateLimitRpm(),
     nodeEnv: process.env.NODE_ENV ?? 'development',
     serveStaticAssets: true,
+    tls: parseOptionalTls(),
+    requireOrigin: process.env.REQUIRE_ORIGIN === 'true',
   };
 }

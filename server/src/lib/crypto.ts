@@ -41,8 +41,22 @@ function parseHexKey(value: string, source: 'env' | 'db' | 'file'): Buffer {
 // the client as "Can't reach the server". Production still requires an explicit
 // env key: a generated key lives only on the local disk and silently losing it
 // would make every stored API key undecryptable.
+//
+// Only auto-generate when NODE_ENV is explicitly 'development' or 'test'.
+// An unset or unrecognised NODE_ENV in a production-like deployment (e.g.
+// Docker with NODE_ENV=staging) logs a clear warning that the ephemeral key
+// will not persist across restarts on stateless infra.
 function isDevFallbackAllowed(): boolean {
-  return process.env.NODE_ENV !== 'production';
+  const env = process.env.NODE_ENV;
+  if (env === 'development' || env === 'test') return true;
+  if (env === undefined || env === '') {
+    console.warn(
+      '[crypto] NODE_ENV is not set — auto-generating an encryption key. ' +
+      'Set ENCRYPTION_KEY explicitly and NODE_ENV=production in deployment.',
+    );
+    return true;
+  }
+  return false;
 }
 
 function missingKeyError(): Error {

@@ -1,6 +1,8 @@
 import http from 'http';
 import https from 'https';
-import { assertProviderUrlAllowed } from './url-guard.js';
+import dns from 'node:dns';
+import net from 'node:net';
+import { assertProviderUrlAllowed, classifyIp, assessProviderUrl, METADATA_HOSTNAMES } from './url-guard.js';
 
 // undici (ProxyAgent) and socks-proxy-agent are lazy-loaded on first proxy use
 // ONLY. Importing undici at module top-level eagerly runs its web/cache init,
@@ -327,9 +329,9 @@ export async function proxyFetch(
   try {
     // SSRF guard (#440): 'custom' is the only platform whose target URL is
     // user-supplied (base_url on the api_keys row), so it is re-assessed on
-    // every request — a URL saved before the guard existed, edited in the DB,
-    // or whose DNS now points somewhere blocked still can't reach cloud
-    // metadata / link-local addresses.
+    // every request. Additionally, DNS rebinding protection pins the resolved
+    // address so an attacker-controlled DNS server cannot point to a blocked
+    // address between check and fetch.
     if (platform === 'custom') {
       await assertProviderUrlAllowed(url);
       // Redirects are never followed for custom providers: fetch()'s default
@@ -340,6 +342,43 @@ export async function proxyFetch(
       // path behave the same, and the 3xx is converted to an explicit error
       // below so the operator sees why instead of a confusing empty body.
       init = { ...init, redirect: 'manual' };
+
+      // DNS rebinding protection: resolve the hostname NOW and pin the IP so
+      // a second DNS query by fetch() cannot return a different (blocked)
+      // address. Replace the hostname with the resolved IP and carry the
+      // original hostname as the Host header so virtual hosting still works.
+      const parsed = new URL(url);
+      const hostname = parsed.hostname.toLowerCase();
+      if (!net.isIP(hostname)) {
+        if (METADATA_HOSTNAMES.has(hostname)) {
+          throw new Error('Custom provider URL blocked: cloud metadata endpoints are not reachable');
+        }
+        try {
+          const records = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+          if (records.length > 0) {
+            const pinned = records[0].address;
+            for (const record of records) {
+              const cls = classifyIp(record.address);
+              if (cls === 'metadata' || cls === 'link-local') {
+                throw new Error(`Custom provider URL blocked: hostname resolves to a blocked address (${record.address})`);
+              }
+            }
+            const portStr = parsed.port ? `:${parsed.port}` : '';
+            const pinnedUrl = `${parsed.protocol}//${pinned}${portStr}${parsed.pathname}${parsed.search}`;
+            const originalHost = parsed.hostname;
+            const existingHeaders = (init?.headers as Record<string, string>) ?? {};
+            init = {
+              ...init,
+              headers: { ...existingHeaders, Host: originalHost },
+            };
+            url = pinnedUrl;
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Custom provider URL blocked:')) throw err;
+          // DNS failure may be transient (device not on LAN yet). Allow through
+          // — the guard will re-check on save and on every request.
+        }
+      }
     }
 
     const response = await dispatchFetch(url, init, platform, requestType, timeoutMs);

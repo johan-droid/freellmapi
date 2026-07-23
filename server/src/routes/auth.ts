@@ -10,6 +10,7 @@ import {
   deleteSession,
 } from '../services/auth.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
+import { getDb } from '../db/index.js';
 
 export const authRouter = Router();
 
@@ -23,28 +24,50 @@ const credentialsSchema = z.object({
 });
 
 // ── Brute-force throttle ──────────────────────────────────────────────────
-// Simple in-memory per-email limiter. A local single-user tool doesn't need a
-// distributed store; this just blunts online password guessing.
+// Per-email login lockout backed by the SQLite settings table so it survives
+// server restarts. An in-memory counter tracks attempts within a session for
+// fast path; the lockout expiry timestamp is persisted to the DB.
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
-const attempts = new Map<string, { count: number; lockedUntil: number }>();
+const LOCKOUT_SETTING_PREFIX = 'login_lockout:';
+const inMemoryAttempts = new Map<string, number>();
 
 function isLockedOut(email: string): boolean {
-  const a = attempts.get(email.toLowerCase());
-  return !!a && a.lockedUntil > Date.now();
+  const key = email.toLowerCase();
+  if ((inMemoryAttempts.get(key) ?? 0) >= MAX_ATTEMPTS) return true;
+  try {
+    const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(LOCKOUT_SETTING_PREFIX + key) as { value: string } | undefined;
+    if (row) {
+      const lockedUntil = Number(row.value);
+      if (lockedUntil > Date.now()) return true;
+      getDb().prepare("DELETE FROM settings WHERE key = ?").run(LOCKOUT_SETTING_PREFIX + key);
+    }
+  } catch {
+    // DB not ready — fall back to in-memory only
+  }
+  return false;
 }
 function recordFailure(email: string): void {
   const key = email.toLowerCase();
-  const a = attempts.get(key) ?? { count: 0, lockedUntil: 0 };
-  a.count++;
-  if (a.count >= MAX_ATTEMPTS) {
-    a.lockedUntil = Date.now() + LOCKOUT_MS;
-    a.count = 0;
+  const count = (inMemoryAttempts.get(key) ?? 0) + 1;
+  inMemoryAttempts.set(key, count);
+  if (count >= MAX_ATTEMPTS) {
+    try {
+      getDb().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(LOCKOUT_SETTING_PREFIX + key, String(Date.now() + LOCKOUT_MS));
+    } catch {
+      // DB not ready
+    }
   }
-  attempts.set(key, a);
 }
 function clearFailures(email: string): void {
-  attempts.delete(email.toLowerCase());
+  const key = email.toLowerCase();
+  inMemoryAttempts.delete(key);
+  try {
+    getDb().prepare("DELETE FROM settings WHERE key = ?").run(LOCKOUT_SETTING_PREFIX + key);
+  } catch {
+    // DB not ready
+  }
 }
 
 function bearer(req: Request): string | undefined {
