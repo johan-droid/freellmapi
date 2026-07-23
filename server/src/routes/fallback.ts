@@ -12,7 +12,6 @@ import { BANDIT_PRESETS, type RoutingStrategy } from '../services/scoring.js';
 import { parseBudget } from '../lib/budget.js';
 import { getModelGroups } from '../services/model-groups.js';
 import { getPenaltyInspector } from '../services/penalty-inspector.js';
-import { getActiveProfileId } from '../services/profile-models.js';
 
 export const fallbackRouter = Router();
 
@@ -303,10 +302,6 @@ fallbackRouter.post('/sort/:preset', (req: Request, res: Response) => {
   const db = getDb();
   const activeProfileId = getEffectiveActiveProfileId(db);
   let models: { id: number }[] = [];
-  const activeProfileId = getActiveProfileId(db);
-  const useProfile = activeProfileId != null && Boolean(
-    db.prepare('SELECT 1 FROM profile_models WHERE profile_id = ? LIMIT 1').get(activeProfileId),
-  );
 
   if (preset === 'budget') {
     const allModels = activeProfileId != null

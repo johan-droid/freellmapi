@@ -680,7 +680,7 @@ export async function runFusion(params: {
         }
       : (skipKeys: Set<string>, skipModels: Set<number>) => routeRequest(
           judgeEstimate, skipKeys.size ? skipKeys : undefined, undefined, false, false,
-          skipModels.size ? skipModels : undefined, undefined,
+          skipModels.size ? skipModels : undefined, undefined, undefined,
           // The judge writes the final answer the client receives, so a
           // structured-output request must not land it on a platform whose
           // policy drops response_format (kilo) — the schema would never even

@@ -25,6 +25,7 @@ import type { Platform } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey, type QuotaObservationContext } from '../services/provider-quota.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from '../services/model-groups.js';
 import { buildModelListing } from '../services/model-listing.js';
+import { detectRequestIntent } from '../services/request-intent.js';
 
 export const proxyRouter = Router();
 
@@ -1164,6 +1165,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     });
     return;
   }
+  const requestIntent = detectRequestIntent(messages, tools);
 
   // Guardrail: per-request token budget (request_max_tokens_budget, default
   // off). Estimated input (incl. images) + requested output must fit the
@@ -1468,7 +1470,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
       // model is on record). Turns where injection can't happen — every turn 1, and
       // sessions that never switched — pay no headroom tax.
       const routingEstimate = handoffPossible ? estimatedTotal + HANDOFF_MAX_TOKENS : estimatedTotal;
-      return routeRequest(routingEstimate, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, samplingParams.response_format !== undefined);
+      return routeRequest(routingEstimate, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, requestIntent, samplingParams.response_format !== undefined);
     },
     dispatch: async (route, attempt) => {
     const modelKey = `${route.platform}:${route.modelId}`;

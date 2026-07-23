@@ -18,6 +18,7 @@ import { parseBudget } from '../lib/budget.js';
 import { platformDropsResponseFormat } from '../lib/sampling-params.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdToMembers } from './model-groups.js';
 import { getActiveProfileId } from './profile-models.js';
+export { getActiveProfileId };
 import type { BaseProvider } from '../providers/base.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { Db } from '../db/types.js';
@@ -651,12 +652,7 @@ const GLOBAL_SORT_ALIASES: Record<string, string> = {
 const CATALOG_ROUTABLE_STATUSES = ['active', 'candidate'] as const;
 const CATALOG_ROUTABLE_STATUS_SQL = CATALOG_ROUTABLE_STATUSES.map(status => `'${status}'`).join(', ');
 
-export function getActiveProfileId(db: Db): number | null {
-  const activeProfileSetting = db.prepare("SELECT value FROM settings WHERE key = 'active_profile_id'").get() as { value: string } | undefined;
-  if (!activeProfileSetting) return null;
-  const profileId = parseInt(activeProfileSetting.value, 10);
-  return Number.isInteger(profileId) ? profileId : null;
-}
+
 
 export function getActiveChain(db: Db): ChainRow[] {
   const profileId = getActiveProfileId(db);
