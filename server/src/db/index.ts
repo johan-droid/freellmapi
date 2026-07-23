@@ -1,17 +1,19 @@
 import crypto from 'crypto';
-import BetterSqlite from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'url';
 import { resolveDefaultDbPath } from '../env.js';
 import { runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import { nodeSqliteFactory } from './node-sqlite.js';
 import type { Db, DbFactory } from './types.js';
 
 export type { Db, DbFactory } from './types.js';
 
 const DB_PATH = resolveDefaultDbPath();
+const runtimeRequire = createRequire(import.meta.url);
 
 let db: Db;
 
@@ -28,7 +30,20 @@ export function getDefaultDbPath(): string {
 
 /** Default factory: opens a better-sqlite3 connection at the given path. */
 function betterSqliteFactory(resolvedPath: string): Db {
-  return new BetterSqlite(resolvedPath) as unknown as Db;
+  let BetterSqlite: new (path: string) => unknown;
+  try {
+    BetterSqlite = runtimeRequire('better-sqlite3') as new (path: string) => unknown;
+  } catch (cause) {
+    throw new Error(
+      'better-sqlite3 is not installed. Reinstall dependencies, or use Node.js 22.13+ on Android/Termux.',
+      { cause },
+    );
+  }
+  return new BetterSqlite(resolvedPath) as Db;
+}
+
+export function defaultDbFactory(platform: NodeJS.Platform = process.platform): DbFactory {
+  return platform === 'android' ? nodeSqliteFactory : betterSqliteFactory;
 }
 
 export function connectDb(
@@ -44,7 +59,7 @@ export function connectDb(
   const resolvedPath = dbPath ?? getDefaultDbPath();
   const isMemory = resolvedPath === ':memory:';
   const ensureDir = opts?.ensureDir ?? true;
-  const factory = opts?.factory ?? betterSqliteFactory;
+  const factory = opts?.factory ?? defaultDbFactory();
 
   if (!isMemory && ensureDir) {
     const dataDir = path.dirname(resolvedPath);

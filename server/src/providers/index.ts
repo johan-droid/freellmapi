@@ -83,10 +83,17 @@ register(new CohereProvider());
 register(new CloudflareProvider());
 
 // Zhipu (Z.ai / bigmodel.cn) - OpenAI-compatible
+//
+// glm-4.7-flash is a hidden-reasoning model: it burns through a long
+// reasoning_content before the first answer byte (live-probed 41s TTFB on a
+// one-word completion, 2026-07-11), and Zhipu buffers that phase even when
+// streaming — so the default 15s timeout aborted every attempt. 60s covers
+// the observed worst case with headroom.
 register(new OpenAICompatProvider({
   platform: 'zhipu',
   name: 'Zhipu AI',
   baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+  timeoutMs: 60_000,
 }));
 
 // Hugging Face Inference Providers router — re-added in V13. The V4 removal
@@ -136,21 +143,14 @@ register(new OpenAICompatProvider({
   keyless: true,
 }));
 
-// Pollinations — OpenAI-compatible, anonymous tier. The chat completions
-// endpoint lives at `/openai/v1/chat/completions` (NOT `/v1/...` — the
-// `/openai` prefix is mandatory). Public model list returns one anonymous
-// model (`openai-fast` = GPT-OSS 20B on OVH, tools=true).
-// Registered keyless (June 2026): the legacy text API is deprecated for
-// AUTHENTICATED users (replacement enter.pollinations.ai is pay-as-you-go
-// "pollen"), while anonymous access is explicitly unaffected — so the anon
-// path is the only recurring-free one left. Anon is queue-limited to 1
-// concurrent request per IP (429 "Queue full" on overlap; live-probed
-// 2026-06-10).
+// Pollinations — OpenAI-compatible recurring shared-capacity tier. The legacy
+// text.pollinations.ai host returned 502 in the July 2026 audit; publishable
+// keys now use the unified gen.pollinations.ai endpoint. Free capacity accrues
+// at one pollen per IP per hour, so chat requires a real publishable key.
 register(new OpenAICompatProvider({
   platform: 'pollinations',
   name: 'Pollinations',
-  baseUrl: 'https://text.pollinations.ai/openai/v1',
-  keyless: true,
+  baseUrl: 'https://gen.pollinations.ai/v1',
 }));
 
 // LLM7.io — OpenAI-compatible aggregator. 100 req/hr free; anonymous access
@@ -200,10 +200,14 @@ register(new OpenAICompatProvider({
 // before 429s (no documented RPM/RPD). Free key from platform.agnes-ai.com,
 // no card. Catalog rows live in the catalog (premium → age into free); not
 // shipped as freeapi model migrations.
+// agnes-2.0-flash reasons before answering (live-probed 20s TTFB on a
+// one-word completion, 2026-07-11), so the default 15s timeout aborted it;
+// 60s matches the other reasoning-hosting platforms.
 register(new OpenAICompatProvider({
   platform: 'agnes',
   name: 'Agnes AI',
   baseUrl: 'https://apihub.agnes-ai.com/v1',
+  timeoutMs: 60_000,
 }));
 
 // Chutes was evaluated for V11 and dropped: probe with a free-tier key
@@ -273,6 +277,36 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.ainative.studio/api/v1',
 }));
 
+// Aion Labs — OpenAI-compatible aggregator (api.aionlabs.ai/v1). Free key from
+// aionlabs.ai (no card); recurring free availability is catalog-managed so
+// premium users see rows immediately and free users get them after 30 days.
+register(new OpenAICompatProvider({
+  platform: 'aion',
+  name: 'Aion Labs',
+  baseUrl: 'https://api.aionlabs.ai/v1',
+}));
+
+// Requesty — OpenAI-compatible router (router.requesty.ai/v1). Free key from
+// requesty.ai (no card); free model rows age into the public monthly catalog
+// through the standard 30-day gate.
+register(new OpenAICompatProvider({
+  platform: 'requesty',
+  name: 'Requesty',
+  baseUrl: 'https://router.requesty.ai/v1',
+}));
+
+// NavyAI — OpenAI-compatible unified API (api.navy/v1). Free key from the
+// Discord-backed dashboard; the free plan is 150K tokens/day and 20 RPM.
+// Live smoke tests required an explicit User-Agent header.
+register(new OpenAICompatProvider({
+  platform: 'navy',
+  name: 'NavyAI',
+  baseUrl: 'https://api.navy/v1',
+  extraHeaders: {
+    'User-Agent': 'FreeLLMAPI/1.0',
+  },
+}));
+
 // NaraRouter — OpenAI-compatible aggregator (router.bynara.id/v1). Free plan
 // requires a no-card API key plus Telegram channel/link verification. Live
 // probed 2026-07-09: `mistral-large`, `mistral-medium-3-5`, and `tencent-hy3`
@@ -283,6 +317,16 @@ register(new OpenAICompatProvider({
   platform: 'nara',
   name: 'NaraRouter',
   baseUrl: 'https://router.bynara.id/v1',
+}));
+
+// SEA-LION (AI Singapore) — OpenAI-compatible first-party API (api.sea-lion.ai/v1).
+// Free key from sea-lion.ai (Google sign-in, no card, no region wall); recurring
+// free tier at 10 RPM. Catalog rows live in the Oracle catalog (premium now, free
+// after the 30-day model-age gate).
+register(new OpenAICompatProvider({
+  platform: 'sealion',
+  name: 'SEA-LION',
+  baseUrl: 'https://api.sea-lion.ai/v1',
 }));
 
 // AI Horde — free, community-powered inference (volunteer workers) via an

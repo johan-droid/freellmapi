@@ -7,10 +7,11 @@ import type {
   ChatToolDefinition,
   TokenUsage,
 } from '@freellmapi/shared/types.js';
-import { BaseProvider, providerHttpError, type CompletionOptions } from './base.js';
+import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import { contentToString } from '../lib/content.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
+import { providerTimeoutMs } from '../lib/provider-timeout.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -74,6 +75,7 @@ function recallThoughtSig(callId: string | undefined, name?: string, args?: unkn
 
 interface GeminiPart {
   text?: string;
+  thought?: boolean;
   inlineData?: {
     mimeType: string;
     data: string;
@@ -102,6 +104,56 @@ interface GeminiResponse {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
     totalTokenCount?: number;
+  };
+}
+
+type GeminiContent = { role: 'user' | 'model'; parts: GeminiPart[] };
+
+function isGemmaModel(modelId: string): boolean {
+  const normalized = modelId.toLowerCase().replace(/^models\//, '');
+  return /(?:^|[/.:])gemma[-_]/.test(normalized);
+}
+
+function optionsForModel(modelId: string, options?: CompletionOptions): CompletionOptions | undefined {
+  if (!isGemmaModel(modelId) || !options) return options;
+  const { tools: _tools, tool_choice: _toolChoice, parallel_tool_calls: _parallelToolCalls, ...rest } = options;
+  return rest;
+}
+
+function systemInstructionText(systemInstruction: { parts?: Array<{ text?: string }> } | undefined): string | null {
+  const text = systemInstruction?.parts
+    ?.map(part => part.text ?? '')
+    .join('\n\n')
+    .trim();
+  return text ? text : null;
+}
+
+function contentsForModel(
+  modelId: string,
+  contents: GeminiContent[],
+  systemInstruction: { parts: Array<{ text: string }> } | undefined,
+): { contents: GeminiContent[]; systemInstruction?: { parts: Array<{ text: string }> } } {
+  if (!isGemmaModel(modelId)) return { contents, systemInstruction };
+
+  const cleaned = contents
+    .map((entry): GeminiContent | null => {
+      const parts = entry.parts.filter(part => !part.functionCall && !part.functionResponse);
+      if (parts.length === 0) return null;
+      return { ...entry, parts };
+    })
+    .filter((entry): entry is GeminiContent => entry !== null);
+  const safeContents = cleaned.length > 0
+    ? cleaned
+    : [{ role: 'user' as const, parts: [{ text: '' }] }];
+
+  const systemText = systemInstructionText(systemInstruction);
+  if (!systemText) return { contents: safeContents };
+
+  return {
+    contents: [
+      { role: 'user', parts: [{ text: systemText }] },
+      ...safeContents,
+    ],
   };
 }
 
@@ -184,6 +236,37 @@ function sanitizeForGeminiSchema(schema: unknown, insidePropertiesMap: boolean):
 // it. It maps to Gemini's `{ google_search: {} }` tool rather than a function
 // declaration, and can ride alongside real function tools in the same array. (#59)
 const GROUNDING_TOOL_NAMES = new Set(['google_search', 'googlesearch', 'google_search_retrieval']);
+
+/**
+ * Extended generationConfig knobs translated from the OpenAI wire: topK,
+ * seed, penalties, and structured output. JSON output conflicts with function
+ * calling on Gemini ("Function calling with a response mime type:
+ * 'application/json' is unsupported"), so response_format is only applied on
+ * tool-free requests. Params Gemini has no equivalent for (min_p, logit_bias,
+ * logprobs…) are dropped by the platform policy in lib/sampling-params.ts and
+ * are ignored here. Exported for tests.
+ */
+export function toGeminiExtendedConfig(options?: CompletionOptions): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    topK: options?.top_k,
+    seed: options?.seed,
+    presencePenalty: options?.presence_penalty,
+    frequencyPenalty: options?.frequency_penalty,
+  };
+  const rf = options?.response_format;
+  // Count only real function declarations, mirroring hasFunctionDeclarations:
+  // grounding pseudo-tools (google_search etc.) are converted to a grounding
+  // block by toGeminiTools and never conflict with responseMimeType — raw
+  // tools.length was silently dropping structured output for grounding-only
+  // requests.
+  const hasTools = (options?.tools ?? []).some(t => !GROUNDING_TOOL_NAMES.has(t.function.name.toLowerCase()));
+  if (rf && !hasTools) {
+    out.responseMimeType = 'application/json';
+    const schema = rf.type === 'json_schema' ? rf.json_schema?.schema : undefined;
+    if (schema) out.responseSchema = sanitizeForGemini(schema);
+  }
+  return out;
+}
 
 function toGeminiTools(tools?: ChatToolDefinition[]): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) return undefined;
@@ -305,7 +388,10 @@ async function userContentToParts(content: ChatMessage['content']): Promise<Gemi
 // Translate OpenAI messages to Gemini format. Content may arrive as a string,
 // null, or the OpenAI multimodal array envelope. System/assistant/tool messages
 // flatten to text; user messages additionally carry images as inlineData parts.
-async function toGeminiContents(messages: ChatMessage[]) {
+async function toGeminiContents(messages: ChatMessage[]): Promise<{
+  contents: GeminiContent[];
+  systemInstruction?: { parts: Array<{ text: string }> };
+}> {
   const systemMessages = messages
     .filter(m => m.role === 'system')
     .map(m => contentToString(m.content))
@@ -416,6 +502,16 @@ function extractToolCalls(parts: GeminiPart[] | undefined): ChatToolCall[] {
 function extractText(parts: GeminiPart[] | undefined): string | null {
   if (!parts) return null;
   const text = parts
+    .filter(p => p.thought !== true)
+    .map(p => p.text ?? '')
+    .join('');
+  return text.length > 0 ? text : null;
+}
+
+function extractReasoningContent(parts: GeminiPart[] | undefined): string | null {
+  if (!parts) return null;
+  const text = parts
+    .filter(p => p.thought === true)
     .map(p => p.text ?? '')
     .join('');
   return text.length > 0 ? text : null;
@@ -440,7 +536,8 @@ export class GoogleProvider extends BaseProvider {
 
   constructor(opts: GoogleProviderOptions = {}) {
     super();
-    this.timeoutMs = opts.timeoutMs ?? 15000;
+    // PROVIDER_TIMEOUT_GOOGLE wins over the registration default (#547).
+    this.timeoutMs = providerTimeoutMs('google', opts.timeoutMs ?? 15000);
   }
 
   async chatCompletion(
@@ -450,23 +547,26 @@ export class GoogleProvider extends BaseProvider {
     options?: CompletionOptions,
     quotaContext?: QuotaObservationContext,
   ): Promise<ChatCompletionResponse> {
-    const { contents, systemInstruction } = await toGeminiContents(messages);
+    const translated = await toGeminiContents(messages);
+    const request = contentsForModel(modelId, translated.contents, translated.systemInstruction);
+    const modelOptions = optionsForModel(modelId, options);
 
-    const tools = toGeminiTools(options?.tools);
+    const tools = toGeminiTools(modelOptions?.tools);
     const body: Record<string, unknown> = {
-      contents,
+      contents: request.contents,
       generationConfig: {
-        temperature: options?.temperature,
-        maxOutputTokens: options?.max_tokens,
-        topP: options?.top_p,
-        stopSequences: toGeminiStopSequences(options?.stop),
+        temperature: modelOptions?.temperature,
+        maxOutputTokens: modelOptions?.max_tokens,
+        topP: modelOptions?.top_p,
+        stopSequences: toGeminiStopSequences(modelOptions?.stop),
+        ...toGeminiExtendedConfig(modelOptions),
       },
       tools,
       // functionCallingConfig is only valid when real function tools are present;
       // a grounding-only request (just google_search) must omit it. (#59)
-      toolConfig: hasFunctionDeclarations(tools) ? toGeminiToolConfig(options?.tool_choice) : undefined,
+      toolConfig: hasFunctionDeclarations(tools) ? toGeminiToolConfig(modelOptions?.tool_choice) : undefined,
     };
-    if (systemInstruction) body.systemInstruction = systemInstruction;
+    if (request.systemInstruction) body.systemInstruction = request.systemInstruction;
 
     const url = `${API_BASE}/models/${modelId}:generateContent`;
     const res = await this.fetchWithTimeout(url, {
@@ -497,6 +597,7 @@ export class GoogleProvider extends BaseProvider {
     const parts = candidate?.content?.parts;
     const toolCalls = extractToolCalls(parts);
     const text = extractText(parts);
+    const reasoningContent = extractReasoningContent(parts);
 
     const usage: TokenUsage = {
       prompt_tokens: data.usageMetadata?.promptTokenCount ?? 0,
@@ -514,6 +615,7 @@ export class GoogleProvider extends BaseProvider {
         message: {
           role: 'assistant',
           content: text,
+          ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
         finish_reason: toolCalls.length > 0 ? 'tool_calls' : toGeminiFinishReason(candidate?.finishReason),
@@ -530,21 +632,24 @@ export class GoogleProvider extends BaseProvider {
     options?: CompletionOptions,
     quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
-    const { contents, systemInstruction } = await toGeminiContents(messages);
+    const translated = await toGeminiContents(messages);
+    const request = contentsForModel(modelId, translated.contents, translated.systemInstruction);
+    const modelOptions = optionsForModel(modelId, options);
 
-    const tools = toGeminiTools(options?.tools);
+    const tools = toGeminiTools(modelOptions?.tools);
     const body: Record<string, unknown> = {
-      contents,
+      contents: request.contents,
       generationConfig: {
-        temperature: options?.temperature,
-        maxOutputTokens: options?.max_tokens,
-        topP: options?.top_p,
-        stopSequences: toGeminiStopSequences(options?.stop),
+        temperature: modelOptions?.temperature,
+        maxOutputTokens: modelOptions?.max_tokens,
+        topP: modelOptions?.top_p,
+        stopSequences: toGeminiStopSequences(modelOptions?.stop),
+        ...toGeminiExtendedConfig(modelOptions),
       },
       tools,
-      toolConfig: hasFunctionDeclarations(tools) ? toGeminiToolConfig(options?.tool_choice) : undefined,
+      toolConfig: hasFunctionDeclarations(tools) ? toGeminiToolConfig(modelOptions?.tool_choice) : undefined,
     };
-    if (systemInstruction) body.systemInstruction = systemInstruction;
+    if (request.systemInstruction) body.systemInstruction = request.systemInstruction;
 
     const url = `${API_BASE}/models/${modelId}:streamGenerateContent?alt=sse`;
     const res = await this.fetchWithTimeout(url, {
@@ -581,20 +686,78 @@ export class GoogleProvider extends BaseProvider {
 
     const seenToolCallKeys = new Set<string>();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const raw = trimmed.slice(6);
-        if (raw === '[DONE]') {
-          if (!emittedFinish) {
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const raw = trimmed.slice(6);
+          if (raw === '[DONE]') {
+            if (!emittedFinish) {
+              emittedFinish = true;
+              yield {
+                id,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: modelId,
+                choices: [{
+                  index: 0,
+                  delta: {},
+                  finish_reason: sawToolCalls ? 'tool_calls' : 'stop',
+                }],
+              };
+            }
+            return;
+          }
+
+          // Skip malformed SSE frames instead of aborting the whole stream.
+          // Matches the defensive parse in openai-compat / cohere / cloudflare:
+          // a single corrupt chunk shouldn't take down the rest of the response.
+          let chunk: GeminiResponse;
+          try {
+            chunk = JSON.parse(raw) as GeminiResponse;
+          } catch {
+            continue;
+          }
+          const candidate = chunk.candidates?.[0];
+          const parts = candidate?.content?.parts ?? [];
+
+          const text = extractText(parts);
+          const reasoningContent = extractReasoningContent(parts);
+          const toolCalls = extractToolCalls(parts).filter(call => {
+            const key = `${call.id}:${call.function.name}:${call.function.arguments}`;
+            if (seenToolCallKeys.has(key)) return false;
+            seenToolCallKeys.add(key);
+            return true;
+          });
+
+          if ((text && text.length > 0) || (reasoningContent && reasoningContent.length > 0) || toolCalls.length > 0) {
+            sawToolCalls = sawToolCalls || toolCalls.length > 0;
+            yield {
+              id,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: modelId,
+              choices: [{
+                index: 0,
+                delta: {
+                  ...(text ? { content: text } : {}),
+                  ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+                  ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                },
+                finish_reason: null,
+              }],
+            };
+          }
+
+          if (candidate?.finishReason && !emittedFinish) {
             emittedFinish = true;
             yield {
               id,
@@ -604,67 +767,21 @@ export class GoogleProvider extends BaseProvider {
               choices: [{
                 index: 0,
                 delta: {},
-                finish_reason: sawToolCalls ? 'tool_calls' : 'stop',
+                finish_reason: sawToolCalls ? 'tool_calls' : toGeminiFinishReason(candidate.finishReason),
               }],
             };
+            return;
           }
-          return;
-        }
-
-        // Skip malformed SSE frames instead of aborting the whole stream.
-        // Matches the defensive parse in openai-compat / cohere / cloudflare:
-        // a single corrupt chunk shouldn't take down the rest of the response.
-        let chunk: GeminiResponse;
-        try {
-          chunk = JSON.parse(raw) as GeminiResponse;
-        } catch {
-          continue;
-        }
-        const candidate = chunk.candidates?.[0];
-        const parts = candidate?.content?.parts ?? [];
-
-        const text = extractText(parts);
-        const toolCalls = extractToolCalls(parts).filter(call => {
-          const key = `${call.id}:${call.function.name}:${call.function.arguments}`;
-          if (seenToolCallKeys.has(key)) return false;
-          seenToolCallKeys.add(key);
-          return true;
-        });
-
-        if ((text && text.length > 0) || toolCalls.length > 0) {
-          sawToolCalls = sawToolCalls || toolCalls.length > 0;
-          yield {
-            id,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: modelId,
-            choices: [{
-              index: 0,
-              delta: {
-                ...(text ? { content: text } : {}),
-                ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-              },
-              finish_reason: null,
-            }],
-          };
-        }
-
-        if (candidate?.finishReason && !emittedFinish) {
-          emittedFinish = true;
-          yield {
-            id,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model: modelId,
-            choices: [{
-              index: 0,
-              delta: {},
-              finish_reason: sawToolCalls ? 'tool_calls' : toGeminiFinishReason(candidate.finishReason),
-            }],
-          };
-          return;
         }
       }
+    } finally {
+      // Runs on normal completion, on the early returns above, AND when the
+      // consumer abandons the generator mid-stream (a client disconnect breaks
+      // the route pump's for-await, which calls gen.return() at the yield
+      // point). Without it the Gemini generation kept running upstream —
+      // quota burning with nobody reading — because this adapter reads the
+      // body itself instead of going through readSseStream's shared cleanup.
+      reader.cancel().catch(() => { /* upstream already gone */ });
     }
 
     if (!emittedFinish) {
@@ -682,7 +799,7 @@ export class GoogleProvider extends BaseProvider {
     }
   }
 
-  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
+  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<KeyValidationResult> {
     // Transport errors propagate — health.ts marks status='error' without
     // counting toward auto-disable.
     const res = await this.fetchWithTimeout(
@@ -730,13 +847,19 @@ export class GoogleProvider extends BaseProvider {
       /API key not valid|API key expired|API_KEY_INVALID/i.test(message);
     if (badCredentials) {
       console.warn(`[Google] validateKey: key rejected as invalid (HTTP ${res.status}${reason ? ` ${reason}` : ''})`);
-      return false;
+      return {
+        valid: false,
+        error: `Google key validation failed (HTTP ${res.status}${reason ? ` ${reason}` : ''})${message ? `: ${message}` : ''}`,
+      };
     }
 
     console.warn(
       `[Google] validateKey: inconclusive HTTP ${res.status} (${gStatus ?? 'UNKNOWN'}${reason ? `/${reason}` : ''}): ${message.slice(0, 200)} ` +
       `— treating as 'error', not auto-disabling (the key may be valid but blocked by region/permission/restriction on this host).`,
     );
-    throw new Error(`Google key validation inconclusive (HTTP ${res.status}${gStatus ? ` ${gStatus}` : ''})`);
+    throw new Error(
+      `Google key validation inconclusive (HTTP ${res.status}${gStatus ? ` ${gStatus}` : ''}${reason ? ` ${reason}` : ''})` +
+      `${message ? `: ${message}` : ''}`,
+    );
   }
 }

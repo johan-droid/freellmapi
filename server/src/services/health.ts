@@ -5,12 +5,23 @@ import { scheduleHydrateSecretsToRemote } from './remote-secrets.js';
 import type { Platform, KeyStatus } from '@freellmapi/shared/types.js';
 import { inferQuotaPoolKey } from './provider-quota.js';
 import type { Scheduler } from '../lib/scheduler.js';
+import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const CONSECUTIVE_FAILURES_TO_DISABLE = 3;
 
 // Track consecutive failures per key
 const failureCount = new Map<number, number>();
+
+function recordInvalidFailure(keyId: number): void {
+  const count = (failureCount.get(keyId) ?? 0) + 1;
+  failureCount.set(keyId, count);
+
+  if (count >= CONSECUTIVE_FAILURES_TO_DISABLE) {
+    getDb().prepare('UPDATE api_keys SET enabled = 0 WHERE id = ?').run(keyId);
+    console.log(`[Health] Auto-disabled key ${keyId} after ${count} consecutive failures`);
+  }
+}
 
 export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
   const db = getDb();
@@ -23,29 +34,34 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
 
   try {
     const apiKey = decrypt(row.encrypted_key, row.iv, row.auth_tag);
-    const isValid = await provider.validateKey(apiKey, {
+    const validation = await provider.validateKey(apiKey, {
       platform: row.platform as Platform,
       keyId,
       quotaPoolKey: inferQuotaPoolKey(row.platform as Platform, null),
       endpoint: 'models',
       origin: 'health',
     });
+    const isValid = typeof validation === 'boolean' ? validation : validation.valid;
+    const lastError = isValid
+      ? null
+      : sanitizeProviderErrorMessage(
+          typeof validation === 'boolean'
+            ? `${provider.name} rejected the API key`
+            : validation.error,
+        );
 
     const status: KeyStatus = isValid ? 'healthy' : 'invalid';
 
-    db.prepare("UPDATE api_keys SET status = ?, last_checked_at = datetime('now') WHERE id = ?")
-      .run(status, keyId);
+    db.prepare("UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now') WHERE id = ?")
+      .run(status, lastError, keyId);
 
     if (isValid) {
       failureCount.delete(keyId);
     } else {
-      const count = (failureCount.get(keyId) ?? 0) + 1;
-      failureCount.set(keyId, count);
-
-      if (count >= CONSECUTIVE_FAILURES_TO_DISABLE) {
-        db.prepare('UPDATE api_keys SET enabled = 0 WHERE id = ?').run(keyId);
-        console.log(`[Health] Auto-disabled key ${keyId} after ${count} consecutive failures`);
-      }
+      console.warn(
+        `[Health] Key ${keyId} (${row.platform}, base=${row.base_url ?? 'default'}) invalid: ${lastError}`,
+      );
+      recordInvalidFailure(keyId);
     }
 
     return status;
@@ -58,29 +74,44 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
     // "[Health] Key N (" prefix is preserved so the 12-hourly crash watchdog
     // (cron bff5ae167d28) that scrapes /tmp/freellmapi.log for these lines
     // continues to match unchanged.
+    const lastError = sanitizeProviderErrorMessage(err?.message ?? err);
     console.error(
       `[Health] Key ${keyId} (${row.platform}, base=${row.base_url ?? 'default'}) ` +
-      `transport error: ${err.message}`,
+      `transport error: ${lastError}`,
     );
-    db.prepare("UPDATE api_keys SET status = ?, last_checked_at = datetime('now') WHERE id = ?")
-      .run('error', keyId);
+    db.prepare("UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now') WHERE id = ?")
+      .run('error', lastError, keyId);
     return 'error';
   }
 }
 
-export async function checkAllKeys(): Promise<void> {
-  const db = getDb();
-  const keys = db.prepare('SELECT id, platform FROM api_keys WHERE enabled = 1').all() as { id: number; platform: string }[];
+// Overlap guard: the scheduled 5-minute pass and wake-recovery re-probes can
+// coincide (or SIGCONT spam can queue several) — concurrent full passes
+// multiply provider validate traffic and let two passes each increment the
+// same genuinely-bad key's failureCount, reaching the auto-disable threshold
+// in fewer wall-clock checks than "3 consecutive checks" intends. A second
+// caller joins the in-flight pass instead of starting another.
+let checkAllInFlight: Promise<void> | null = null;
 
-  console.log(`[Health] Checking ${keys.length} keys...`);
+export function checkAllKeys(): Promise<void> {
+  if (checkAllInFlight) return checkAllInFlight;
+  checkAllInFlight = (async () => {
+    const db = getDb();
+    const keys = db.prepare('SELECT id, platform FROM api_keys WHERE enabled = 1').all() as { id: number; platform: string }[];
 
-  for (const key of keys) {
-    await checkKeyHealth(key.id);
-  }
+    console.log(`[Health] Checking ${keys.length} keys...`);
 
-  scheduleHydrateSecretsToRemote(db);
+    for (const key of keys) {
+      await checkKeyHealth(key.id);
+    }
 
-  console.log(`[Health] Check complete.`);
+    scheduleHydrateSecretsToRemote(db);
+
+    console.log(`[Health] Check complete.`);
+  })().finally(() => {
+    checkAllInFlight = null;
+  });
+  return checkAllInFlight;
 }
 
 let cancelHealthCheck: (() => void) | null = null;

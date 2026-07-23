@@ -19,6 +19,7 @@ type SecretKey = {
   last_checked_at: string | null;
   base_url: string | null;
   options_json: string;
+  last_health_error: string | null;
 };
 
 type ProviderAccount = {
@@ -97,13 +98,15 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
           created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
           last_checked_at TEXT,
           base_url TEXT,
-          options_json TEXT NOT NULL DEFAULT '{}'
+          options_json TEXT NOT NULL DEFAULT '{}',
+          last_health_error TEXT
         )
       \`);
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS account_name TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS account_email TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS external_id TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS options_json TEXT NOT NULL DEFAULT '{}'");
+      await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_health_error TEXT");
       await pool.query(\`
         CREATE TABLE IF NOT EXISTS provider_accounts (
           id TEXT PRIMARY KEY,
@@ -149,7 +152,7 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
       await ensureSchema();
       const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT key, value FROM settings ORDER BY key'),
-        pool.query('SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json FROM api_keys ORDER BY id'),
+        pool.query('SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error FROM api_keys ORDER BY id'),
         pool.query('SELECT id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at FROM provider_accounts ORDER BY id'),
       ]);
       console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows, providerAccounts: providerAccounts.rows }));
@@ -168,9 +171,9 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
         for (const row of input.apiKeys ?? []) {
           await pool.query(\`
             INSERT INTO api_keys
-              (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json)
+              (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error)
             VALUES
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT (id) DO UPDATE SET
               platform = EXCLUDED.platform,
               label = EXCLUDED.label,
@@ -185,10 +188,11 @@ function runRemoteCommand(action: 'status' | 'pull' | 'push', payload?: SecretSn
               created_at = EXCLUDED.created_at,
               last_checked_at = EXCLUDED.last_checked_at,
               base_url = EXCLUDED.base_url,
-              options_json = EXCLUDED.options_json
+              options_json = EXCLUDED.options_json,
+              last_health_error = EXCLUDED.last_health_error
           \`, [
             row.id, row.platform, row.label, row.account_name, row.account_email, row.external_id,
-            row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json,
+            row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json, row.last_health_error,
           ]);
         }
         for (const row of input.providerAccounts ?? []) {
@@ -317,13 +321,15 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
           created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
           last_checked_at TEXT,
           base_url TEXT,
-          options_json TEXT NOT NULL DEFAULT '{}'
+          options_json TEXT NOT NULL DEFAULT '{}',
+          last_health_error TEXT
         )
       \`);
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS account_name TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS account_email TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS external_id TEXT");
       await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS options_json TEXT NOT NULL DEFAULT '{}'");
+      await pool.query("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_health_error TEXT");
       await pool.query(\`
         CREATE TABLE IF NOT EXISTS provider_accounts (
           id TEXT PRIMARY KEY,
@@ -369,7 +375,7 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
       await ensureSchema();
       const [settings, apiKeys, providerAccounts] = await Promise.all([
         pool.query('SELECT key, value FROM settings ORDER BY key'),
-        pool.query('SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json FROM api_keys ORDER BY id'),
+        pool.query('SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error FROM api_keys ORDER BY id'),
         pool.query('SELECT id, provider_slug, display_name, account_email, encrypted_api_key, key_iv, key_auth_tag, key_hint, linked_api_key_id, status, base_url, created_at, updated_at FROM provider_accounts ORDER BY id'),
       ]);
       console.log(JSON.stringify({ settings: settings.rows, apiKeys: apiKeys.rows, providerAccounts: providerAccounts.rows }));
@@ -388,9 +394,9 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
         for (const row of input.apiKeys ?? []) {
           await pool.query(\`
             INSERT INTO api_keys
-              (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json)
+              (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error)
             VALUES
-              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT (id) DO UPDATE SET
               platform = EXCLUDED.platform,
               label = EXCLUDED.label,
@@ -405,10 +411,11 @@ async function runRemoteCommandAsync(action: 'status' | 'pull' | 'push', payload
               created_at = EXCLUDED.created_at,
               last_checked_at = EXCLUDED.last_checked_at,
               base_url = EXCLUDED.base_url,
-              options_json = EXCLUDED.options_json
+              options_json = EXCLUDED.options_json,
+              last_health_error = EXCLUDED.last_health_error
           \`, [
             row.id, row.platform, row.label, row.account_name, row.account_email, row.external_id,
-            row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json,
+            row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json, row.last_health_error,
           ]);
         }
         for (const row of input.providerAccounts ?? []) {
@@ -507,7 +514,7 @@ export function hasRemoteSecretsStore(): boolean {
 function readLocalSecretSnapshot(db: Db): SecretSnapshot {
   const settings = db.prepare('SELECT key, value FROM settings ORDER BY key').all() as SecretSetting[];
   const apiKeys = db.prepare(`
-    SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json
+    SELECT id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error
     FROM api_keys
     ORDER BY id
   `).all() as SecretKey[];
@@ -526,8 +533,8 @@ function upsertLocalSecrets(db: Db, snapshot: SecretSnapshot): void {
   `);
   const upsertKey = db.prepare(`
     INSERT INTO api_keys
-      (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, platform, label, account_name, account_email, external_id, encrypted_key, iv, auth_tag, status, enabled, created_at, last_checked_at, base_url, options_json, last_health_error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       platform = excluded.platform,
       label = excluded.label,
@@ -542,7 +549,8 @@ function upsertLocalSecrets(db: Db, snapshot: SecretSnapshot): void {
       created_at = excluded.created_at,
       last_checked_at = excluded.last_checked_at,
       base_url = excluded.base_url,
-      options_json = excluded.options_json
+      options_json = excluded.options_json,
+      last_health_error = excluded.last_health_error
   `);
   const upsertProviderAccount = db.prepare(`
     INSERT INTO provider_accounts
@@ -570,7 +578,7 @@ function upsertLocalSecrets(db: Db, snapshot: SecretSnapshot): void {
     for (const row of snapshot.apiKeys) {
       upsertKey.run(
         row.id, row.platform, row.label, row.account_name, row.account_email, row.external_id,
-        row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json,
+        row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.created_at, row.last_checked_at, row.base_url, row.options_json, row.last_health_error,
       );
     }
     for (const row of snapshot.providerAccounts ?? []) {
