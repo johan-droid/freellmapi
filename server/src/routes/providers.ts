@@ -9,6 +9,7 @@ import { encryptSecret, maskSecret } from '../security/secrets.js';
 import { runModelDiscoveryOnce } from '../jobs/modelDiscoveryJob.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
 import { inferQuotaPoolKey, getQuotaStateForKeys } from '../services/provider-quota.js';
+import { getPenaltyInspector, type InspectorRow } from '../services/penalty-inspector.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 
 export const providersRouter = Router();
@@ -105,12 +106,16 @@ providersRouter.get('/quota-pools', (_req: Request, res: Response) => {
   const keyCounts = new Map(keyCountsRows.map(r => [r.platform, r.count]));
 
   const quotaStates = getQuotaStateForKeys();
+  const inspector = getPenaltyInspector();
+  const inspectorMap = new Map<number | null, InspectorRow>(inspector.rows.map((r: InspectorRow) => [r.modelDbId, r]));
+
   const poolsMap = new Map<string, any>();
 
   for (const model of models) {
     const platform = model.platform as Platform;
     const poolKey = inferQuotaPoolKey(platform, model.model_id);
     const registryEntry = getProviderRegistryEntry(platform);
+    const activeKeys = keyCounts.get(platform) ?? 0;
 
     if (!poolsMap.has(poolKey)) {
       poolsMap.set(poolKey, {
@@ -118,13 +123,27 @@ providersRouter.get('/quota-pools', (_req: Request, res: Response) => {
         providerSlug: platform,
         providerDisplayName: registryEntry?.displayName ?? platform,
         isShared: true,
-        activeKeyCount: keyCounts.get(platform) ?? 0,
+        activeKeyCount: activeKeys,
         models: [],
         quotaState: [],
       });
     }
 
     const pool = poolsMap.get(poolKey);
+    const insp = inspectorMap.get(model.id);
+    const hasActiveCooldown = (insp?.cooldowns?.length ?? 0) > 0;
+    const hasPenalty = (insp?.penalty?.hits ?? 0) > 0;
+    const hasErrors = (insp?.recentErrorCount ?? 0) > 0;
+
+    let healthStatus: 'healthy' | 'cooling_down' | 'degraded' | 'unusable' = 'healthy';
+    if (model.enabled === 0 || activeKeys === 0) {
+      healthStatus = 'unusable';
+    } else if (hasActiveCooldown) {
+      healthStatus = 'cooling_down';
+    } else if (hasPenalty || hasErrors) {
+      healthStatus = 'degraded';
+    }
+
     pool.models.push({
       id: model.id,
       modelId: model.model_id,
@@ -137,6 +156,12 @@ providersRouter.get('/quota-pools', (_req: Request, res: Response) => {
       rpdLimit: model.rpd_limit,
       tpmLimit: model.tpm_limit,
       tpdLimit: model.tpd_limit,
+      healthStatus,
+      penaltyHits: insp?.penalty?.hits ?? 0,
+      penaltyFactor: insp?.penalty?.rateLimitFactor ?? 1,
+      cooldownExpiresInMs: hasActiveCooldown && insp?.cooldowns ? Math.max(0, Math.max(...insp.cooldowns.map((c: { expiresInMs: number }) => c.expiresInMs))) : null,
+      recentErrorCount: insp?.recentErrorCount ?? 0,
+      recentErrors: insp?.recentErrors?.map((e: { error: string; createdAt: string }) => ({ error: e.error, createdAt: e.createdAt })) ?? [],
     });
   }
 
