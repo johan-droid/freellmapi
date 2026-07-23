@@ -71,6 +71,7 @@
   "models": {
     "title": "Models",
     "chatModelsTab": "Chat models",
+    "poolsTab": "Quota Pools & Routing",
     "fusionTab": "Fusion",
     "embeddingsTab": "Embeddings",
     "imageTab": "Image",

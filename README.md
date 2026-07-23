@@ -41,6 +41,7 @@ Your router updates its own model catalog from a signed feed: new free models, q
 - [How it works](#how-it-works)
 - [Context Handoff](#context-handoff)
 - [Limitations](#limitations)
+- [Quota Pools & Provider Routing Architecture](docs/quota-pools-routing.md)
 - [Documentation index](docs/README.md)
 - [Contributor guide](CONTRIBUTING.md)
 - [Contributing](#contributing)

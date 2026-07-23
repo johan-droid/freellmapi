@@ -8,6 +8,8 @@ import { PROVIDER_REGISTRY, getProviderRegistryEntry } from '../providers/regist
 import { encryptSecret, maskSecret } from '../security/secrets.js';
 import { runModelDiscoveryOnce } from '../jobs/modelDiscoveryJob.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
+import { inferQuotaPoolKey, getQuotaStateForKeys } from '../services/provider-quota.js';
+import type { Platform } from '@freellmapi/shared/types.js';
 
 export const providersRouter = Router();
 export const providerAccountsRouter = Router();
@@ -85,6 +87,75 @@ providersRouter.get('/', (_req: Request, res: Response) => {
     activeModelCount: stats.get(provider.slug)?.active_model_count ?? 0,
     unavailableModelCount: stats.get(provider.slug)?.unavailable_model_count ?? 0,
   })));
+});
+
+providersRouter.get('/quota-pools', (_req: Request, res: Response) => {
+  ensureSchema();
+  const db = getDb();
+
+  const models = db.prepare(`
+    SELECT id, platform, model_id, display_name, enabled, supports_vision, supports_tools, context_window, rpm_limit, rpd_limit, tpm_limit, tpd_limit
+    FROM models
+    ORDER BY platform ASC, display_name ASC
+  `).all() as any[];
+
+  const keyCountsRows = db.prepare(`
+    SELECT platform, COUNT(*) as count FROM api_keys WHERE enabled = 1 GROUP BY platform
+  `).all() as { platform: string; count: number }[];
+  const keyCounts = new Map(keyCountsRows.map(r => [r.platform, r.count]));
+
+  const quotaStates = getQuotaStateForKeys();
+  const poolsMap = new Map<string, any>();
+
+  for (const model of models) {
+    const platform = model.platform as Platform;
+    const poolKey = inferQuotaPoolKey(platform, model.model_id);
+    const registryEntry = getProviderRegistryEntry(platform);
+
+    if (!poolsMap.has(poolKey)) {
+      poolsMap.set(poolKey, {
+        poolKey,
+        providerSlug: platform,
+        providerDisplayName: registryEntry?.displayName ?? platform,
+        isShared: true,
+        activeKeyCount: keyCounts.get(platform) ?? 0,
+        models: [],
+        quotaState: [],
+      });
+    }
+
+    const pool = poolsMap.get(poolKey);
+    pool.models.push({
+      id: model.id,
+      modelId: model.model_id,
+      displayName: model.display_name,
+      enabled: model.enabled === 1,
+      supportsVision: model.supports_vision === 1,
+      supportsTools: model.supports_tools === 1,
+      contextWindow: model.context_window,
+      rpmLimit: model.rpm_limit,
+      rpdLimit: model.rpd_limit,
+      tpmLimit: model.tpm_limit,
+      tpdLimit: model.tpd_limit,
+    });
+  }
+
+  for (const state of quotaStates) {
+    const pool = poolsMap.get(state.quotaPoolKey);
+    if (pool) {
+      pool.quotaState.push({
+        metric: state.metric,
+        limit: state.limit,
+        remaining: state.remaining,
+        resetAt: state.resetAt,
+        source: state.source,
+        confidence: state.confidence,
+        notes: state.notes,
+      });
+    }
+  }
+
+  res.json(Array.from(poolsMap.values()));
 });
 
 providersRouter.get('/:providerSlug/models', (req: Request, res: Response) => {

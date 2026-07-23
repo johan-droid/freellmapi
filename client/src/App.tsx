@@ -35,6 +35,7 @@ import MediaDetailPage from '@/pages/MediaDetailPage'
 import EmbeddingDetailPage from '@/pages/EmbeddingDetailPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
 import PremiumPage from '@/pages/PremiumPage'
+import QuotaPoolsPage from '@/pages/QuotaPoolsPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
@@ -57,11 +58,12 @@ const navItems = [
   { to: '/premium', labelKey: 'nav.premium' },
 ]
 
-// The five modality pages behind "Models"; surfaced in the nav dropdown and
-// the mobile submenu so Fusion/Embeddings/Image/Audio are discoverable without
+// The modality pages behind "Models"; surfaced in the nav dropdown and
+// the mobile submenu so Fusion/Embeddings/Image/Audio/Pools are discoverable without
 // first landing on the chat table.
 const modelItems = [
   { to: '/models/chat', labelKey: 'models.chatModelsTab' },
+  { to: '/models/pools', labelKey: 'models.poolsTab' },
   { to: '/models/embeddings', labelKey: 'models.embeddingsTab' },
   { to: '/models/image', labelKey: 'models.imageTab' },
   { to: '/models/audio', labelKey: 'models.audioTab' },
@@ -326,6 +328,7 @@ function App() {
                 <Route path="/" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/models" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/models/chat" element={<FallbackPage />} />
+                <Route path="/models/pools" element={<QuotaPoolsPage />} />
                 <Route path="/models/chat/:id" element={<ModelDetailPage />} />
                 <Route path="/models/fusion" element={<FusionPage />} />
                 <Route path="/models/embeddings" element={<EmbeddingsPage />} />
