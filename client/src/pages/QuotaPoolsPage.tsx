@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
   Zap, 
@@ -23,120 +23,15 @@ import {
   Sparkles,
   Sliders
 } from 'lucide-react'
-import mermaid from 'mermaid'
+import { TopologyGraph } from '@/components/topology-graph'
+import type { QuotaPool } from '@/components/topology-graph'
 import { apiFetch } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import { PageHeader } from '@/components/page-header'
 import { ModelsTabs } from '@/components/models-tabs'
 import { Tooltip } from '@/components/tooltip'
 
-export interface QuotaPoolModel {
-  id: number
-  modelId: string
-  displayName: string
-  enabled: boolean
-  supportsVision: boolean
-  supportsTools: boolean
-  contextWindow: number | null
-  rpmLimit: number | null
-  rpdLimit: number | null
-  tpmLimit: number | null
-  tpdLimit: number | null
-  healthStatus: 'healthy' | 'cooling_down' | 'degraded' | 'unusable'
-  penaltyHits: number
-  penaltyFactor: number
-  cooldownExpiresInMs: number | null
-  recentErrorCount: number
-  recentErrors: Array<{ error: string; createdAt: string }>
-}
-
-export interface QuotaMetricState {
-  metric: string
-  limit: number | null
-  remaining: number | null
-  resetAt: string | null
-  source: string
-  confidence: number
-  notes?: string | null
-}
-
-export interface QuotaPool {
-  poolKey: string
-  providerSlug: string
-  providerDisplayName: string
-  isShared: boolean
-  activeKeyCount: number
-  models: QuotaPoolModel[]
-  quotaState: QuotaMetricState[]
-}
-
-// Initialize mermaid
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-  themeVariables: {
-    darkMode: true,
-    background: '#090d16',
-    primaryColor: '#3b82f6',
-    primaryTextColor: '#f8fafc',
-    primaryBorderColor: '#60a5fa',
-    lineColor: '#64748b',
-    secondaryColor: '#8b5cf6',
-    tertiaryColor: '#10b981',
-  },
-  flowchart: {
-    curve: 'basis',
-    useMaxWidth: true,
-  },
-})
-
-function generateMermaidMarkdown(pools: QuotaPool[]): string {
-  let lines: string[] = ['flowchart TD']
-  lines.push('  ClientRouter["⚡ FreeLLMAPI Unified Router"]:::routerStyle')
-
-  const grouped = new Map<string, QuotaPool[]>()
-  for (const pool of pools) {
-    const list = grouped.get(pool.providerSlug) || []
-    list.push(pool)
-    grouped.set(pool.providerSlug, list)
-  }
-
-  let nodeCounter = 0
-  for (const [providerSlug, providerPools] of grouped.entries()) {
-    const providerName = providerPools[0]?.providerDisplayName || providerSlug
-    const providerNodeId = `P_${providerSlug.replace(/[^a-zA-Z0-9]/g, '_')}`
-    
-    lines.push(`  ClientRouter --> ${providerNodeId}["🏢 ${providerName}"]:::providerStyle`)
-
-    for (const pool of providerPools) {
-      const poolNodeId = `Pool_${nodeCounter++}`
-      lines.push(`  ${providerNodeId} --> ${poolNodeId}["🏊 ${pool.poolKey}"]:::poolStyle`)
-
-      for (const m of pool.models.slice(0, 5)) {
-        const modelNodeId = `M_${nodeCounter++}`
-        const cleanModelName = (m.displayName || m.modelId).replace(/["\n]/g, '')
-        
-        let styleClass = 'healthyStyle'
-        if (m.healthStatus === 'cooling_down') styleClass = 'cooldownStyle'
-        else if (m.healthStatus === 'degraded') styleClass = 'degradedStyle'
-        else if (m.healthStatus === 'unusable') styleClass = 'unusableStyle'
-
-        const statusIcon = m.healthStatus === 'healthy' ? '🟢' : m.healthStatus === 'cooling_down' ? '⏳' : m.healthStatus === 'degraded' ? '⚠️' : '⚪'
-        lines.push(`  ${poolNodeId} --> ${modelNodeId}["${statusIcon} ${cleanModelName}"]:::${styleClass}`)
-      }
-    }
-  }
-
-  lines.push('  classDef routerStyle fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff')
-  lines.push('  classDef providerStyle fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f0f9ff')
-  lines.push('  classDef poolStyle fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ecfdf5')
-  lines.push('  classDef healthyStyle fill:#14532d,stroke:#22c55e,stroke-width:1px,color:#f0fdf4')
-  lines.push('  classDef cooldownStyle fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#fef3c7')
-  lines.push('  classDef degradedStyle fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fef2f2')
-  lines.push('  classDef unusableStyle fill:#1e293b,stroke:#475569,stroke-dasharray: 3 3,color:#94a3b8')
-
-  return lines.join('\n')
-}
+// (Mermaid removed — live SVG topology used instead)
 
 export default function QuotaPoolsPage() {
   const queryClient = useQueryClient()
@@ -145,14 +40,6 @@ export default function QuotaPoolsPage() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [activeTab, setActiveTab] = useState<'visual' | 'graph' | 'compiler' | 'cards' | 'explanation'>('visual')
   const [selectedNode, setSelectedNode] = useState<{ type: 'provider' | 'pool' | 'model'; data: any } | null>(null)
-  
-  // Custom Mermaid Compiler Code state
-  const [customMermaidCode, setCustomMermaidCode] = useState<string>('')
-  const [compilerSvg, setCompilerSvg] = useState<string>('')
-  const [compilerError, setCompilerError] = useState<string | null>(null)
-
-  const mermaidRef = useRef<HTMLDivElement>(null)
-  const lastRenderedCodeRef = useRef<string>('')
 
   const { data: pools = [] } = useQuery<QuotaPool[]>({
     queryKey: ['quota-pools'],
@@ -171,61 +58,11 @@ export default function QuotaPoolsPage() {
     },
   })
 
-  const mermaidMarkdown = useMemo(() => generateMermaidMarkdown(pools), [pools])
-
-  // Set initial compiler code when pools load
-  useEffect(() => {
-    if (mermaidMarkdown && !customMermaidCode) {
-      setCustomMermaidCode(mermaidMarkdown)
-    }
-  }, [mermaidMarkdown, customMermaidCode])
-
-  // Stable Mermaid Graph Renderer
-  useEffect(() => {
-    if (activeTab !== 'graph' || !mermaidRef.current || pools.length === 0) return
-    if (lastRenderedCodeRef.current === mermaidMarkdown) return
-
-    let isMounted = true
-    const renderGraph = async () => {
-      try {
-        const id = `mermaid-svg-stable-${Date.now()}`
-        const { svg } = await mermaid.render(id, mermaidMarkdown)
-        if (isMounted && mermaidRef.current) {
-          mermaidRef.current.innerHTML = svg
-          lastRenderedCodeRef.current = mermaidMarkdown
-        }
-      } catch (err) {
-        console.error('Mermaid render error:', err)
-      }
-    }
-
-    renderGraph()
-    return () => { isMounted = false }
-  }, [mermaidMarkdown, activeTab, pools])
-
-  // Custom Mermaid Compiler Handler
-  const compileCustomMermaid = useCallback(async (code: string) => {
-    if (!code.trim()) return
-    try {
-      setCompilerError(null)
-      const id = `mermaid-compiler-${Date.now()}`
-      const { svg } = await mermaid.render(id, code)
-      setCompilerSvg(svg)
-    } catch (err: any) {
-      setCompilerError(err?.message || 'Mermaid syntax error')
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'compiler' && customMermaidCode) {
-      compileCustomMermaid(customMermaidCode)
-    }
-  }, [activeTab, customMermaidCode, compileCustomMermaid])
-
-  const copyMermaidCode = () => {
-    navigator.clipboard.writeText(customMermaidCode || mermaidMarkdown)
-    toast.success('Mermaid code copied to clipboard!')
-  }
+  const copyPoolData = useCallback(() => {
+    const json = JSON.stringify(pools, null, 2)
+    navigator.clipboard.writeText(json)
+    toast.success('Pool data copied to clipboard!')
+  }, [pools])
 
   const filteredPools = useMemo(() => {
     if (!search.trim()) return pools
@@ -329,7 +166,7 @@ export default function QuotaPoolsPage() {
             }`}
           >
             <Network className="mr-1.5 inline size-3.5" />
-            Mermaid Topology
+            Live Topology
           </button>
 
           <button
@@ -341,7 +178,7 @@ export default function QuotaPoolsPage() {
             }`}
           >
             <Code2 className="mr-1.5 inline size-3.5" />
-            Mermaid Compiler
+            Raw Data View
           </button>
 
           <button
@@ -590,65 +427,52 @@ export default function QuotaPoolsPage() {
         </div>
       )}
 
-      {/* TAB 2: Mermaid Graph Rendering */}
+      {/* TAB 2: Live Topology Graph (SVG, no Mermaid) */}
       {activeTab === 'graph' && (
         <section className="rounded-3xl border bg-card p-5">
           <div className="flex items-center justify-between border-b pb-4 mb-4">
             <div>
-              <h2 className="text-sm font-medium">Mermaid Topology Definition</h2>
-              <p className="text-xs text-muted-foreground">Graph visualization showing router distribution layers.</p>
+              <h2 className="text-sm font-medium">Live Topology Graph</h2>
+              <p className="text-xs text-muted-foreground">Router → Provider → Pool → Model mapping with live health status.</p>
             </div>
-            <button
-              onClick={copyMermaidCode}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Copy className="size-3.5" /> Copy Code
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border bg-emerald-500/5 px-2.5 py-1 text-[10px] text-emerald-500">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Healthy
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border bg-amber-500/5 px-2.5 py-1 text-[10px] text-amber-500">
+                <span className="size-1.5 rounded-full bg-amber-500" />
+                Cooling
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border bg-red-500/5 px-2.5 py-1 text-[10px] text-red-500">
+                <span className="size-1.5 rounded-full bg-red-500" />
+                Degraded
+              </span>
+            </div>
           </div>
 
-          <div className="flex justify-center overflow-x-auto py-6 bg-slate-950 rounded-2xl">
-            <div ref={mermaidRef} className="mermaid-chart" />
+          <div className="bg-slate-950 rounded-2xl p-4 overflow-x-auto">
+            <TopologyGraph pools={pools} />
           </div>
         </section>
       )}
 
-      {/* TAB 3: Mermaid Interactive Compiler */}
+      {/* TAB 3: Raw JSON Data View */}
       {activeTab === 'compiler' && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-1">
           <section className="rounded-3xl border bg-card p-5 flex flex-col">
             <div className="flex items-center justify-between border-b pb-4 mb-4">
-              <h2 className="text-sm font-medium">Compiler Source</h2>
+              <h2 className="text-sm font-medium">Raw Pool Data</h2>
               <button
-                onClick={() => compileCustomMermaid(customMermaidCode)}
-                className="h-8 rounded-lg bg-foreground text-background px-3 text-xs font-medium hover:opacity-90 transition-opacity"
+                onClick={copyPoolData}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
-                Compile Code
+                <Copy className="size-3.5" /> Copy JSON
               </button>
             </div>
-
-            <textarea
-              value={customMermaidCode}
-              onChange={(e) => {
-                setCustomMermaidCode(e.target.value)
-                compileCustomMermaid(e.target.value)
-              }}
-              rows={16}
-              className="w-full flex-1 rounded-xl border bg-background p-4 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-
-            {compilerError && (
-              <div className="mt-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3 font-mono text-xs text-destructive">
-                Syntax Error: {compilerError}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-3xl border bg-card p-5">
-            <h2 className="text-sm font-medium border-b pb-4 mb-4">Compiled SVG Preview</h2>
-            <div 
-              className="mermaid-chart flex justify-center overflow-x-auto py-6 bg-slate-950 rounded-2xl"
-              dangerouslySetInnerHTML={{ __html: compilerSvg }}
-            />
+            <pre className="w-full overflow-auto rounded-xl border bg-background p-4 font-mono text-xs text-foreground max-h-[600px]">
+              {JSON.stringify(pools, null, 2)}
+            </pre>
           </section>
         </div>
       )}
