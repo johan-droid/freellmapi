@@ -13,6 +13,17 @@ export interface TlsConfig {
   keyPath: string;
 }
 
+function parseOptionalTls(): TlsConfig | null {
+  const certPath = process.env.TLS_CERT_PATH?.trim();
+  const keyPath = process.env.TLS_KEY_PATH?.trim();
+  if (!certPath && !keyPath) return null;
+  if (!certPath || !keyPath) {
+    console.warn('[config] Both TLS_CERT_PATH and TLS_KEY_PATH must be set for HTTPS — falling back to HTTP');
+    return null;
+  }
+  return { certPath, keyPath };
+}
+
 export interface Config {
   port: number | string;
   host: string;
@@ -24,17 +35,14 @@ export interface Config {
   serveStaticAssets: boolean;
   tls: TlsConfig | null;
   requireOrigin: boolean;
-}
-
-function parseOptionalTls(): TlsConfig | null {
-  const certPath = process.env.TLS_CERT_PATH?.trim();
-  const keyPath = process.env.TLS_KEY_PATH?.trim();
-  if (!certPath && !keyPath) return null;
-  if (!certPath || !keyPath) {
-    console.warn('[config] Both TLS_CERT_PATH and TLS_KEY_PATH must be set for HTTPS — falling back to HTTP');
-    return null;
-  }
-  return { certPath, keyPath };
+  /**
+   * Tri-state override for the CSP `upgrade-insecure-requests` directive (#682).
+   * - undefined: auto — emit the directive only when the request arrived over
+   *   TLS (or behind an HTTPS reverse proxy that forwarded X-Forwarded-Proto).
+   * - true:      always emit (force HTTPS upgrade even on plain HTTP).
+   * - false:     never emit (let HTTP LAN installs render the dashboard).
+   */
+  cspUpgradeInsecureRequests: boolean | undefined;
 }
 
 export function loadConfig(): Config {
@@ -58,5 +66,18 @@ export function loadConfig(): Config {
     serveStaticAssets: true,
     tls: parseOptionalTls(),
     requireOrigin: process.env.REQUIRE_ORIGIN === 'true',
+    // CSP_UPGRADE_INSECURE_REQUESTS: true|false forces the directive on/off;
+    // unset (the default) leaves it on auto — emit only when the request is
+    // already TLS or forwarded as https, so HTTP LAN installs still render.
+    cspUpgradeInsecureRequests: parseCspUpgradeInsecureRequests(),
   };
+}
+
+function parseCspUpgradeInsecureRequests(): boolean | undefined {
+  const raw = process.env.CSP_UPGRADE_INSECURE_REQUESTS;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const lower = raw.trim().toLowerCase();
+  if (lower === 'true' || lower === '1' || lower === 'yes') return true;
+  if (lower === 'false' || lower === '0' || lower === 'no') return false;
+  return undefined;
 }

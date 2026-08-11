@@ -156,7 +156,7 @@ export function ensurePersistenceSchema(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_request_logs_created ON request_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(provider_slug, created_at);
 
-    CREATE TABLE IF NOT EXISTS client_profiles (
+    CREATE TABLE IF NOT EXISTS gateway_client_profiles (
       id TEXT PRIMARY KEY,
       client_key TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
@@ -319,7 +319,7 @@ function seedClientProfiles(db: Db): void {
   ];
 
   const insert = db.prepare(`
-    INSERT INTO client_profiles (
+    INSERT INTO gateway_client_profiles (
       id, client_key, display_name, detection_rules_json, default_workload, routing_policy_json, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(client_key) DO UPDATE SET

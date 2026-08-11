@@ -5,6 +5,8 @@ import { OpenAICompatProvider } from './openai-compat.js';
 import { CohereProvider } from './cohere.js';
 import { CloudflareProvider } from './cloudflare.js';
 import { AIHordeProvider } from './aihorde.js';
+import { ModelScopeProvider } from './modelscope.js';
+import { PollinationsProvider } from './pollinations.js';
 
 const providers = new Map<Platform, BaseProvider>();
 
@@ -31,6 +33,26 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.cerebras.ai/v1',
 }));
 
+// AnyAPI - OpenAI-compatible gateway (anyapi.ai). Free tier (checked against
+// anyapi.ai/pricing 2026-08-10): $0, no card, recurring — but the binding limit
+// is 100K TOKENS PER DAY, and only "free and basic" models are in scope. AnyAPI
+// publishes no RPM/RPD numbers at all; the 20 RPM / 200 RPD figures in #732 are
+// OpenRouter's, not AnyAPI's, so nothing here asserts a request rate.
+//
+// Model rows are NOT seeded here or in migrations — they are authored in the
+// hosted catalog and arrive via catalog-sync once the platform is registered
+// (see services/catalog-sync.ts, which gates on hasProvider). The ids proposed
+// in #732 (meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-coder:free,
+// nvidia/nemotron-3-ultra-550b-a55b:free, google/gemma-4-26b-a4b-it:free) came
+// from a third-party list and are UNVERIFIED against the live /v1/models, which
+// needs a key; treat them as candidates for catalog authoring, where a bad id
+// is caught by the health check instead of shipped as a default.
+register(new OpenAICompatProvider({
+  platform: 'anyapi',
+  name: 'AnyAPI',
+  baseUrl: 'https://api.anyapi.ai/v1',
+}));
+
 // SambaNova was dropped in V23 (June 2026): the free tier is permanently gone.
 // The always-free tier was retired in early 2025 for a one-time $5 trial
 // credit (expires in 3 months); once it lapses, every chat call 402s
@@ -40,13 +62,16 @@ register(new OpenAICompatProvider({
 // ("This model only supports single tool-calls at once!"), so pin
 // parallel_tool_calls to false when tools are present. See issue #255.
 // Reasoning models (deepseek-v4-pro, llama-4-maverick, llama-3.1/3.3-70b) take
-// 30-60s on cold start; the default 15s false-flags them as broken. 90s.
+// 30-60s on cold start; the default 15s false-flags them as broken. 180s:
+// NIM sends SSE headers instantly, then prefills 100k-token prompts for
+// minutes before the first byte, and this value doubles as the streaming
+// first-byte grace budget (#584). Env-tunable via PROVIDER_TIMEOUT_NVIDIA.
 register(new OpenAICompatProvider({
   platform: 'nvidia',
   name: 'NVIDIA NIM',
   baseUrl: 'https://integrate.api.nvidia.com/v1',
   forceSingleToolCall: true,
-  timeoutMs: 90_000,
+  timeoutMs: 180_000,
 }));
 
 // Mistral - OpenAI-compatible
@@ -147,11 +172,11 @@ register(new OpenAICompatProvider({
 // text.pollinations.ai host returned 502 in the July 2026 audit; publishable
 // keys now use the unified gen.pollinations.ai endpoint. Free capacity accrues
 // at one pollen per IP per hour, so chat requires a real publishable key.
-register(new OpenAICompatProvider({
-  platform: 'pollinations',
-  name: 'Pollinations',
-  baseUrl: 'https://gen.pollinations.ai/v1',
-}));
+// Dedicated PollinationsProvider (not plain OpenAICompatProvider) because
+// GET /v1/models is public — it answers 200 for a revoked key — so validation
+// probes the authenticated /account/key instead; see providers/pollinations.ts
+// and issue #608.
+register(new PollinationsProvider());
 
 // LLM7.io — OpenAI-compatible aggregator. 100 req/hr free; anonymous access
 // also works for basic models. Wraps a handful of upstream models behind one
@@ -328,6 +353,25 @@ register(new OpenAICompatProvider({
   name: 'SEA-LION',
   baseUrl: 'https://api.sea-lion.ai/v1',
 }));
+
+// ModelScope (魔搭社区, Alibaba) — OpenAI-compatible inference API
+// (api-inference.modelscope.cn/v1, Bearer auth). Free tier: 2000 requests/day
+// account-wide. Token from modelscope.cn/my/myaccesstoken, BUT calls only work
+// after binding the ModelScope account to an Alibaba Cloud CHINA-site (cn)
+// account with Chinese real-name verification — unbound tokens 401 on every
+// call ("please bind your alibaba cloud account before use"). Dedicated
+// ModelScopeProvider (not plain OpenAICompatProvider) because GET /v1/models
+// answers 200 even for garbage tokens, so key validation needs a 1-token chat
+// probe instead — see providers/modelscope.ts.
+//
+// RETIRED-model gotcha (#581): ModelScope answers requests for retired models
+// with `429 insufficient balance (1008)`. isPaymentRequiredError
+// (lib/error-classify.ts) reads "insufficient balance" as out-of-credits and
+// benches the key ~24h — intentionally NOT special-cased in the shared
+// classifier (the string is a genuine payment marker everywhere else). Keep
+// retired ids out of the catalog instead; the quota-header path in
+// provider-quota.ts keys on response headers, never on that message text.
+register(new ModelScopeProvider());
 
 // AI Horde — free, community-powered inference (volunteer workers) via an
 // OpenAI-compatible proxy. Dedicated AIHordeProvider (not OpenAICompatProvider)

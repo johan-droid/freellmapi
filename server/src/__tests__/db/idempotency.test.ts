@@ -19,7 +19,7 @@ describe('Migration idempotency', () => {
       fallback: (db1.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
       enabledModels: (db1.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 1').get() as { c: number }).c,
       disabledModels: (db1.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 0').get() as { c: number }).c,
-      clientProfiles: (db1.prepare('SELECT COUNT(*) AS c FROM client_profiles').get() as { c: number }).c,
+      clientProfiles: (db1.prepare('SELECT COUNT(*) AS c FROM gateway_client_profiles').get() as { c: number }).c,
       orphanFallbacks: (db1.prepare(`
         SELECT COUNT(*) AS c FROM fallback_config f
         LEFT JOIN models m ON f.model_db_id = m.id
@@ -35,7 +35,7 @@ describe('Migration idempotency', () => {
       fallback: (db2.prepare('SELECT COUNT(*) AS c FROM fallback_config').get() as { c: number }).c,
       enabledModels: (db2.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 1').get() as { c: number }).c,
       disabledModels: (db2.prepare('SELECT COUNT(*) AS c FROM models WHERE enabled = 0').get() as { c: number }).c,
-      clientProfiles: (db2.prepare('SELECT COUNT(*) AS c FROM client_profiles').get() as { c: number }).c,
+      clientProfiles: (db2.prepare('SELECT COUNT(*) AS c FROM gateway_client_profiles').get() as { c: number }).c,
       orphanFallbacks: (db2.prepare(`
         SELECT COUNT(*) AS c FROM fallback_config f
         LEFT JOIN models m ON f.model_db_id = m.id
@@ -58,7 +58,7 @@ describe('Migration idempotency', () => {
       'provider_model_limits',
       'model_change_events',
       'model_probe_results',
-      'client_profiles',
+      'gateway_client_profiles',
       'request_sessions',
       'model_workload_scores',
       'route_decisions',
@@ -77,7 +77,7 @@ describe('Migration idempotency', () => {
     expect(providerCatalogColumns).toContain('last_probe_at');
 
     const profiles = db.prepare(`
-      SELECT client_key, default_workload FROM client_profiles
+      SELECT client_key, default_workload FROM gateway_client_profiles
       ORDER BY client_key
     `).all() as { client_key: string; default_workload: string }[];
     expect(profiles).toEqual([
