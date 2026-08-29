@@ -5,12 +5,13 @@ import fs from 'fs';
 import http from 'http';
 import https from 'https';
 import { createApp } from './app.js';
-import { initDb, getDb, getSetting } from './db/index.js';
+import { initDb, getDb } from './db/index.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
-import { applyProxyUrl, applyProxyEnabled, applyProxyBypass, flushProxyCache } from './lib/proxy.js';
+import { restoreProxySettings, flushProxyCache } from './lib/proxy.js';
 import { startWakeDetect } from './lib/wake-detect.js';
 import { startCatalogSync } from './services/catalog-sync.js';
 import { startCooldownProbe } from './services/cooldown-probe.js';
+import { startCustomModelSync } from './services/custom-model-sync.js';
 import { installProcessSafetyNet } from './lib/process-safety-net.js';
 import { NodeScheduler } from './lib/scheduler.js';
 import { loadConfig } from './lib/config.js';
@@ -18,10 +19,13 @@ import { applyDeclarativeConfigFromEnv } from './services/declarative-config.js'
 import { restoreDbBackupIfNeeded, startDbBackupPump } from './lib/db-backup.js';
 import { hydrateSecretsFromRemote } from './services/remote-secrets.js';
 import { restoreDatabaseBeforeBoot, startDatabaseSnapshotLoop } from './storage/persistence.js';
+import { startBackupScheduler } from './services/backups.js';
 import { userCount } from './services/auth.js';
 import { generateSetupCode } from './lib/setup-code.js';
 import { warnOnEnvDrift } from './lib/env-drift.js';
+import { warnOnRoutingOverrideDrift } from './services/model-weight-overrides.js';
 import { installLogRedaction } from './lib/log-redaction.js';
+import { cleanupExpiredCooldowns } from './services/ratelimit.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -60,6 +64,18 @@ async function main() {
   }
 
   applyDeclarativeConfigFromEnv();
+  // After initDb: the unknown-model half of this check reads the catalog.
+  warnOnRoutingOverrideDrift();
+
+  // Cooldowns persist across restarts on purpose, but their expiry is collected
+  // lazily (isOnCooldown, per model+key). Rows for routes nothing asks about
+  // again — retired models, deleted keys, a shutdown taken while everything was
+  // benched — would otherwise stay in the table forever and weigh down every
+  // cooldown rollup. One sweep at boot, while the DB is quiet.
+  const expiredCooldowns = cleanupExpiredCooldowns();
+  if (expiredCooldowns > 0) {
+    console.log(`[ratelimit] cleared ${expiredCooldowns} expired cooldown${expiredCooldowns === 1 ? '' : 's'}`);
+  }
 
   // First-run hardening: when the dashboard is still unclaimed, mint a one-time
   // setup code and log it. A loopback browser can finish setup without it; a
@@ -70,9 +86,7 @@ async function main() {
 
   // Load the persisted proxy settings from the DB (env var wins if set).
   // Must happen after initDb so the settings table is ready.
-  applyProxyUrl(getSetting('proxy_url') ?? '');
-  applyProxyEnabled(getSetting('proxy_enabled') !== '0'); // default: enabled
-  applyProxyBypass(getSetting('proxy_bypass') ?? '');
+  restoreProxySettings();
 
   const app = createApp(config);
 
@@ -86,6 +100,8 @@ async function main() {
     startCatalogSync(scheduler);
     startCooldownProbe(scheduler);
     startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
+    startBackupScheduler(scheduler);
+    startCustomModelSync(getDb(), scheduler);
 
     // Post-sleep recovery: while the host was suspended (laptop lid, VM
     // pause) timers and keep-alive sockets froze, so the first requests after

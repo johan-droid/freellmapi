@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getDb } from '../db/index.js';
 import { checkKeyHealth, checkAllKeys } from '../services/health.js';
+import { getDegradationStatus } from '../services/degradation.js';
 import { hasProvider } from '../providers/index.js';
 import { getQuotaStateForKeys } from '../services/provider-quota.js';
 import { scheduleHydrateSecretsToRemote } from '../services/remote-secrets.js';
@@ -106,6 +107,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
       failedProbeRows24h: downtimeOverview.failed_probe_rows_24h ?? 0,
       modelsWithDowntime24h: downtimeOverview.models_with_downtime_24h ?? 0,
     },
+    degradation: getDegradationStatus(),
   });
 });
 
