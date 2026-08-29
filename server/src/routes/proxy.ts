@@ -1120,6 +1120,8 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
       false,
       state.skipModels.size > 0 ? state.skipModels : undefined,
       groupChain ?? resolvedChain?.chain,
+      false,
+      state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined,
       outputReserve,
     ),
     dispatch: async (route, attempt, ctx) => {

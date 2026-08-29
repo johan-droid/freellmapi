@@ -2019,7 +2019,7 @@ export function resolveFusionCandidate(modelId: string): FusionCandidate | null 
   return null;
 }
 
-export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requireStructured = false, skipPlatforms?: Set<string>, exactOutputReserve = 0): RouteResult {
+export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requireStructured = false, skipPlatforms?: Set<string>, exactOutputReserve = 0, requestIntent?: RequestIntent, isExplicitPin = false): RouteResult {
   const db = getDb();
 
   const strategy = getRoutingStrategy();

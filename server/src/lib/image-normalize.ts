@@ -45,12 +45,14 @@ const DEFAULT_QUALITY = 90;
 // prebuild, so load it on first use instead and degrade to pass-through when
 // it isn't there: images ride through at original size, exactly as they did
 // before this module existed.
+// @ts-ignore
 type Sharp = typeof import('sharp').default;
 let sharpModule: Sharp | null | undefined;   // undefined = not yet attempted
 
 async function loadSharp(): Promise<Sharp | null> {
   if (sharpModule !== undefined) return sharpModule;
   try {
+    // @ts-ignore
     sharpModule = (await import('sharp')).default;
   } catch (err: any) {
     sharpModule = null;

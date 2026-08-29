@@ -243,7 +243,6 @@ export async function runInboundChat(
       wantsTools,
       state.skipModels.size ? state.skipModels : undefined,
       pin.strictChain,
-      undefined,
       input.responseFormat !== undefined,
       state.skipPlatforms.size ? state.skipPlatforms : undefined,
       outputReserve,
