@@ -1262,7 +1262,6 @@ keysRouter.post('/custom', async (req: Request, res: Response) => {
     // beats registering a chat model that can never answer.
     videoSkipped: videoEntries.map(e => e.modelId),
     modelErrors: perModelErrors,
-  });
     // Bulk registration (#488) needs to tell the user what actually changed:
     // picking a whole discovered list re-submits ids that are already there.
     created: registered.filter(m => m.created).length
