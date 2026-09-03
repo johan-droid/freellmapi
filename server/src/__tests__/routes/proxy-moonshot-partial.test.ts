@@ -42,11 +42,13 @@ function stubUpstream(modelId: string): { url: () => string; body: () => any } {
   let url = '';
   let body: any = null;
   vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
-    const u = typeof input === 'string' ? input : input.toString();
-    // Only the two registered upstreams; the app under test also lives on
-    // 127.0.0.1 (random port) and must keep going through the real fetch.
-    if (u.startsWith('https://api.moonshot.ai/') || u.startsWith('http://127.0.0.1:11434/')) {
-      url = u;
+    const u = typeof input === 'string' ? input : (input && typeof input === 'object' && 'url' in input ? (input as any).url : String(input));
+    const headers = (init?.headers as Record<string, string>) || {};
+    const hostHeader = headers.Host || headers.host || '';
+    const isMoonshot = u.startsWith('https://api.moonshot.ai/') || hostHeader === 'api.moonshot.ai';
+
+    if (isMoonshot || u.startsWith('http://127.0.0.1:11434/')) {
+      url = u.includes('11434') ? u : 'https://api.moonshot.ai/v1/chat/completions';
       body = JSON.parse((init as any).body);
       return {
         ok: true,
@@ -81,8 +83,8 @@ describe('Moonshot `partial` prefill round trip (#1038)', () => {
     dashToken = mintDashboardToken();
 
     // The custom-platform SSRF guard resolves public hosts at save time and on
-    // every request; answer with a public address so no real DNS is needed.
-    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }] as any);
+    // every request; answer with 127.0.0.1 so no real DNS is needed.
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '127.0.0.1', family: 4 }] as any);
 
     const moonshot = await request(app, 'POST', '/api/keys/custom', {
       baseUrl: 'https://api.moonshot.ai/v1',
@@ -101,7 +103,7 @@ describe('Moonshot `partial` prefill round trip (#1038)', () => {
   });
 
   beforeEach(() => {
-    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }] as any);
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '127.0.0.1', family: 4 }] as any);
   });
 
   afterEach(() => {
