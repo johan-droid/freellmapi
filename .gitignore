@@ -25,3 +25,8 @@ update-hermes.sh
 
 # Monetization planning — private, never committed
 monetization/
+
+# Stale test logs and local dev scratch scripts
+vitest_output.log
+scripts/dev/
+

@@ -724,7 +724,11 @@ export default function AnalyticsPage() {
   })()
   const extrapolated = spanDays < 29.5
   const savings30d = extrapolated ? baseSavings * (30 / spanDays) : baseSavings
-  const rangeLabel = range === '24h' ? t('analytics.rangeLabel24h')
+  const rangeLabel = range === '5m' ? '5m'
+    : range === '15m' ? '15m'
+    : range === '1h' ? '1h'
+    : range === '6h' ? '6h'
+    : range === '24h' ? t('analytics.rangeLabel24h')
     : range === '7d' ? t('analytics.rangeLabel7d')
     : range === '30d' ? t('analytics.rangeLabel30d')
     : t('analytics.rangeLabel90d')
@@ -771,7 +775,11 @@ export default function AnalyticsPage() {
             onValueChange={updateRange}
             options={TIME_RANGES.map(r => ({
               value: r,
-              label: t(r === '24h' ? 'analytics.range24h' : r === '7d' ? 'analytics.range7d' : r === '30d' ? 'analytics.range30d' : 'analytics.range90d'),
+              label: r === '24h' ? t('analytics.range24h')
+                : r === '7d' ? t('analytics.range7d')
+                : r === '30d' ? t('analytics.range30d')
+                : r === '90d' ? t('analytics.range90d')
+                : r,
             }))}
             ariaLabel={t('analytics.title')}
           />

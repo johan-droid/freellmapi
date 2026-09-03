@@ -124,8 +124,6 @@ function clearModelFailure(route: RouteResult): void {
 // 0 disables the budget entirely.
 // Precedence mirrors the response cache: the settings-table value wins when
 // present (runtime-tunable), then the env var, then the default.
-// TODO(fallback-v2): AbortController hedging so a stalled attempt can be
-// abandoned mid-flight instead of only refusing to start the next one.
 export const DEFAULT_FALLBACK_TIME_BUDGET_MS = 45_000;
 export const FALLBACK_TIME_BUDGET_SETTING = 'fallback_time_budget_ms';
 

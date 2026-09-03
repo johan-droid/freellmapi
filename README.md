@@ -377,7 +377,7 @@ Contributors very welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev lo
 
 - **Add a provider** — copy `server/src/providers/openai-compat.ts` as a template, wire it into `server/src/providers/index.ts`, seed its models in `server/src/db/index.ts`, add a test in `server/src/__tests__/providers/`.
 - **Add an endpoint** — moderations and other OpenAI-compatible surfaces. The provider base class can grow new methods; adapters declare which they support.
-- **Improve the router** — cost-aware routing (cheapest-healthy-fastest tradeoffs), better latency-weighted priority, regional pinning.
+- **Improve the router** — regional pinning, custom routing strategy extensions, and dynamic provider weighting fine-tuning.
 - **Dashboard polish** — charts on the Analytics page, key rotation UX, batch import of keys from `.env`.
 - **Docs** — more examples, client library snippets for Go/Rust/etc., a deployment recipe for Docker or Fly.
 
