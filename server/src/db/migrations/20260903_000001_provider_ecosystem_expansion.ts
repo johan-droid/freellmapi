@@ -47,15 +47,26 @@ export function up(db: Db): void {
   refreshModelIntentFlags(db);
   applyModelPricing(db);
 
-  // Backfill newly seeded models into active profiles
+  db.prepare("DELETE FROM settings WHERE key = 'provider_ecosystem_expansion_downgraded'").run();
+
+  // Backfill newly seeded expansion models into active profiles
   const profiles = db.prepare('SELECT id FROM profiles').all() as { id: number }[];
   const insertProfileModel = db.prepare('INSERT OR IGNORE INTO profile_models (profile_id, model_db_id, priority, enabled) VALUES (?, ?, ?, 1)');
-  
+
+  const expansionPlatforms = [
+    'hyperbolic', 'lambda', 'nebius', 'nscale', 'nous', 'llama_api',
+    'perplexity', 'xai', 'liquid', 'upstage', 'morph',
+    'aws_bedrock', 'google_vertex', 'azure', 'watsonx', 'scaleway',
+    'ollama_local', 'lmstudio', 'llamacpp', 'vllm'
+  ];
+  const expansionPlaceholders = expansionPlatforms.map(() => '?').join(',');
+
   for (const p of profiles) {
     const unmapped = db.prepare(`
       SELECT m.id FROM models m
-      WHERE m.id NOT IN (SELECT model_db_id FROM profile_models WHERE profile_id = ?)
-    `).all(p.id) as { id: number }[];
+      WHERE m.platform IN (${expansionPlaceholders})
+        AND m.id NOT IN (SELECT model_db_id FROM profile_models WHERE profile_id = ?)
+    `).all(...expansionPlatforms, p.id) as { id: number }[];
 
     for (let i = 0; i < unmapped.length; i++) {
       insertProfileModel.run(p.id, unmapped[i].id, 999 + i);
@@ -63,6 +74,10 @@ export function up(db: Db): void {
   }
 }
 
-export function down(_db: Db): void {
-  // Safe forward-only migration
+export function down(db: Db): void {
+  db.prepare(`
+    INSERT INTO settings (key, value)
+    VALUES ('provider_ecosystem_expansion_downgraded', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run();
 }
