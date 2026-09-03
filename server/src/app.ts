@@ -37,6 +37,8 @@ import { urlTokenRouter } from './routes/url-tokens.js';
 import { updateRouter } from './routes/update.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
+import { autoComboRouter } from './routes/autoCombo.js';
+import { oauthRouter } from './routes/oauth.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
 // user exports keys occasionally, never ten times a minute.
@@ -204,6 +206,7 @@ export function createApp(config?: Config) {
   // session; everything else under /api/* requires a logged-in dashboard user.
   // The /v1 proxy keeps its own unified-API-key auth and is NOT gated here.
   app.use('/api/auth', authRouter);
+  app.use('/api/auth', oauthRouter);
 
   // Admin API — all routes share an IP-based rate limiter to throttle
   // brute-force attempts (auth, key export, etc). The limiter is mounted
@@ -252,6 +255,7 @@ export function createApp(config?: Config) {
   app.use('/api/cache', requireAuth, cacheRouter);
   app.use('/api/compression', requireAuth, compressionRouter);
   app.use('/api/update', requireAuth, updateRouter);
+  app.use('/api/auto-combo', requireAuth, autoComboRouter);
 
   // Health check — no auth required.
   app.get('/api/ping', (_req, res) => {

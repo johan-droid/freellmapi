@@ -2,9 +2,9 @@
 
 # FreeLLMAPI
 
-**7.4 billion tokens per month.  34 free LLM providers. 635 free model endpoints. One OpenAI-compatible endpoint.**
+**Multi-Provider AI Gateway & Intelligent Auto-Combo Routing Engine**
 
-Aggregate free tiers from dozens of providers, plus custom OpenAI-compatible chat, embedding, image, and audio endpoints, behind a single `/v1` API. Keys are stored encrypted. A router picks the best available model for each request, falls over to the next provider when one is rate-limited, and tracks per-key usage so you stay under every free-tier cap.
+Aggregate 35+ native AI providers, cloud infrastructure services (AWS Bedrock, Google Vertex, Azure OpenAI, IBM watsonx), local self-hosted engines (Ollama, LM Studio, llama.cpp, vLLM), and custom OpenAI-compatible endpoints behind a single unified `/v1` API. Keys are securely stored with AES-256-GCM encryption. The Intelligent Auto-Combo Engine dynamically picks optimal models, enforces infrastructure diversity, learns rate limits live, and handles failovers automatically across providers.
 
 [![CI](https://github.com/tashfeenahmed/freellmapi/actions/workflows/ci.yml/badge.svg)](https://github.com/tashfeenahmed/freellmapi/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/tashfeenahmed/freellmapi?style=flat&logo=github&color=yellow)](https://github.com/tashfeenahmed/freellmapi/stargazers)
@@ -99,9 +99,24 @@ And the free-tier landscape shifts weekly: providers launch models, retire them,
 
 </div>
 
-Plus a **custom** provider — point chat, embedding, image, or audio models at any OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, a local Ollama, or a remote gateway) from the Keys page.
+### Comprehensive Multi-Provider Ecosystem
 
-The full, always-current list lives at **[freellmapi.co/models](https://freellmapi.co/models.html)** with per-model rate limits, context windows, and free-token budgets.
+FreeLLMAPI supports **35+ native, cloud, aggregator, and self-hosted local providers** out of the box:
+
+| Provider Category | Supported Platforms |
+| :--- | :--- |
+| **Tier 1 Native Inference** | OpenAI, Anthropic, Google Gemini, Groq, Cerebras, SambaNova, Fireworks AI, Together AI, OpenRouter, GitHub Models, Mistral AI, NVIDIA NIM, Cloudflare Workers AI, Hugging Face Inference, Replicate, AI21 Labs, Cohere, FriendliAI, Featherless AI, Baseten, DeepInfra, Hyperbolic, Lambda AI, Nebius AI, nScale, Nous Research, Meta Llama API, Perplexity AI, xAI (Grok), Liquid AI, Upstage Solar, Morph Labs, Jina AI, Voyage AI, Nomic AI |
+| **Enterprise Cloud Infrastructure** | AWS Bedrock, Google Vertex AI, Azure OpenAI, IBM watsonx, Scaleway |
+| **Local Self-Hosted Inference** | Ollama Local (`localhost:11434`), LM Studio (`localhost:1234`), llama.cpp (`localhost:8080`), vLLM Engine (`localhost:8000`) |
+| **Aggregator Networks** | OpenRouter, GitHub Models, Kilo Gateway |
+
+### Intelligent Auto-Combo Smart Router & Governance
+- **16-Factor Auto Scoring**: Ranks models based on P95 latency, health score, quota headroom, context length, cost inverse, stability, and task fitness.
+- **Infrastructure Diversity Bonus**: Prefers genuine independent inference hosts over repetitive aggregators during fallback and candidate selection.
+- **Live Rate-Limit Learning**: Parses upstream `x-ratelimit-*` and `retry-after` headers to dynamically adjust quota pools and trigger automated cooldowns.
+- **China Regional Governance Policy**: Built-in jurisdiction filtering automatically excludes China-region provider endpoints (`jurisdiction = 'china'`) by default to comply with strict data residency rules.
+
+The full, always-current list lives at **[freellmapi.co/models](https://freellmapi.co/models.html)** with per-model rate limits, context windows, and token budgets.
 
 ## Compatible CLIs & coding agents
 

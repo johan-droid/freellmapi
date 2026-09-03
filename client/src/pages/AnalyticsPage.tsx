@@ -41,9 +41,9 @@ import { platformColors } from '@/lib/routing'
 import { categoryAxisProps, verticalCategoryAxisProps } from '@/lib/chart-axis'
 import { useI18n } from '@/i18n'
 
-type TimeRange = '24h' | '7d' | '30d' | '90d'
+type TimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | '7d' | '30d' | '90d'
 
-const TIME_RANGES: TimeRange[] = ['24h', '7d', '30d', '90d']
+const TIME_RANGES: TimeRange[] = ['5m', '15m', '1h', '6h', '24h', '7d', '30d', '90d']
 
 // The range toggle sticks: whichever window you last looked at is the one the
 // tab opens with next time, instead of always snapping back to 7d (#711).
@@ -61,7 +61,14 @@ function storedRange(): TimeRange {
 // Latency percentiles and TTFT are null when the raw window is empty (pruned).
 interface SummaryResponse {
   totalRequests: number
+  totalTokens?: number
   successRate: number
+  errorRate?: number
+  rate429Count?: number
+  rate429Rate?: number
+  fallbackCount?: number
+  fallbackRate?: number
+  activeProvidersCount?: number
   totalInputTokens: number
   totalOutputTokens: number
   avgLatencyMs: number
@@ -142,6 +149,20 @@ interface ByKeyRow {
   avgLatencyMs: number
   totalInputTokens: number
   totalOutputTokens: number
+}
+
+interface QuotaPoolRow {
+  accountId: string
+  providerSlug: string
+  accountName: string
+  status: string
+  quotaPoolKey: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  failedRequests: number
+  lastActivity: string | null
 }
 
 interface ErrorDistribution {
@@ -510,11 +531,13 @@ export default function AnalyticsPage() {
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['analytics', 'summary', range],
     queryFn: () => apiFetch<SummaryResponse>(`/api/analytics/summary?range=${range}`),
+    refetchInterval: 5000,
   })
 
   const { data: byPlatform = [] } = useQuery({
     queryKey: ['analytics', 'by-platform', range],
     queryFn: () => apiFetch<ByPlatformRow[]>(`/api/analytics/by-platform?range=${range}`),
+    refetchInterval: 5000,
   })
 
   // Friendly display name per providerId: catalog → the platform id, custom →
@@ -525,6 +548,7 @@ export default function AnalyticsPage() {
   const { data: byClient = [] } = useQuery({
     queryKey: ['analytics', 'by-client', range],
     queryFn: () => apiFetch<ByClientRow[]>(`/api/analytics/by-client?range=${range}`),
+    refetchInterval: 5000,
   })
 
   // Browser's offset from UTC in minutes (480 = UTC+8), so the server buckets
@@ -534,21 +558,31 @@ export default function AnalyticsPage() {
   const { data: timeline = [] } = useQuery({
     queryKey: ['analytics', 'timeline', range, tzOffset],
     queryFn: () => apiFetch<TimelineBucket[]>(`/api/analytics/timeline?range=${range}&tzOffset=${tzOffset}`),
+    refetchInterval: 5000,
   })
 
   const { data: byModel = [] } = useQuery({
     queryKey: ['analytics', 'by-model', range],
     queryFn: () => apiFetch<ByModelRow[]>(`/api/analytics/by-model?range=${range}`),
+    refetchInterval: 5000,
   })
 
   const { data: byKey = [] } = useQuery({
     queryKey: ['analytics', 'by-key', range],
     queryFn: () => apiFetch<ByKeyRow[]>(`/api/analytics/by-key?range=${range}`),
+    refetchInterval: 5000,
+  })
+
+  const { data: quotaPools = [] } = useQuery({
+    queryKey: ['analytics', 'quota-pools'],
+    queryFn: () => apiFetch<QuotaPoolRow[]>('/api/analytics/quota-pools'),
+    refetchInterval: 5000,
   })
 
   const { data: errors = [] } = useQuery({
     queryKey: ['analytics', 'errors', range],
     queryFn: () => apiFetch<RecentErrorRow[]>(`/api/analytics/errors?range=${range}`),
+    refetchInterval: 5000,
   })
 
   const { data: brokerLive } = useQuery<BrokerLive>({
@@ -560,6 +594,7 @@ export default function AnalyticsPage() {
   const { data: errorDist } = useQuery({
     queryKey: ['analytics', 'error-distribution', range],
     queryFn: () => apiFetch<ErrorDistribution>(`/api/analytics/error-distribution?range=${range}`),
+    refetchInterval: 5000,
   })
 
   // Recent-calls list filters (status/platform) + the row opened in the
@@ -579,6 +614,7 @@ export default function AnalyticsPage() {
       if (platformFilter !== 'all') params.set('provider', platformFilter)
       return apiFetch<RecentCallsResponse>(`/api/analytics/requests?${params}`)
     },
+    refetchInterval: 5000,
   })
 
   // Savings card shows ONE stable monthly figure regardless of the selected
@@ -816,22 +852,23 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Summary stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
           {summaryLoading ? (
-            Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-[74px] rounded-3xl" />)
+            Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-[74px] rounded-3xl" />)
           ) : (
             <>
               <Stat icon={Activity} label={t('analytics.requests')} value={summary?.totalRequests ?? 0} hint={requestsHint} />
+              <Stat icon={Coins} label="Total Tokens" value={formatTokens(summary?.totalTokens ?? ((summary?.totalInputTokens ?? 0) + (summary?.totalOutputTokens ?? 0)))} />
               <Stat icon={CheckCircle2} label={t('analytics.successRate')} value={`${summary?.successRate ?? 0}%`} />
+              <Stat icon={TriangleAlert} label="Error Rate" value={`${summary?.errorRate ?? 0}%`} className={(summary?.errorRate ?? 0) > 0 ? 'text-destructive' : ''} />
+              <Stat icon={CircleAlert} label="429 Rate Limits" value={`${summary?.rate429Count ?? 0} (${summary?.rate429Rate ?? 0}%)`} />
+              <Stat icon={GitBranch} label="Fallback Rate" value={`${summary?.fallbackCount ?? 0} (${summary?.fallbackRate ?? 0}%)`} />
+              <Stat icon={Server} label="Active Providers" value={summary?.activeProvidersCount ?? 0} />
               <Stat icon={ArrowDown} label={t('analytics.inputTokens')} value={formatTokens(summary?.totalInputTokens)} />
               <Stat icon={ArrowUp} label={t('analytics.outputTokens')} value={formatTokens(summary?.totalOutputTokens)} />
               <Stat icon={Gauge} label={t('analytics.avgLatency')} value={`${summary?.avgLatencyMs ?? 0} ms`} />
               <Stat icon={Clock} label={t('analytics.p95Latency')} value={p95Value} />
               <Stat icon={Zap} label={t('analytics.avgTtft')} value={ttftValue} />
-              {/* Priced per request at the served model's paid-API equivalent
-                  rate (not a flat frontier-model rate) — see db/model-pricing.ts.
-                  The value is a 30-day projection; the hover hint tells the whole
-                  story (actual period amount + whether it was extrapolated). */}
               <Stat icon={CircleDollarSign} label={t('analytics.estSavings')} value={`$${savings30d.toFixed(2)}`} hint={savingsHint} />
             </>
           )}
@@ -1024,7 +1061,7 @@ export default function AnalyticsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <SegmentedControl
                     value={statusFilter}
-                    onValueChange={setStatusFilter}
+                    onValueChange={(v) => setStatusFilter(v as StatusFilter)}
                     options={[
                       { value: 'all', label: t('analytics.filterAll') },
                       { value: 'success', label: t('common.success') },
@@ -1199,6 +1236,54 @@ export default function AnalyticsPage() {
                           <TableCell className="text-right tabular-nums">{formatTokens(m.totalInputTokens)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatTokens(m.totalOutputTokens)}</TableCell>
                           <TableCell className="text-right tabular-nums pr-4">${(m.estimatedCost ?? 0).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <div className="lg:col-span-2">
+            <Panel icon={Network} title="Quota Pools Analytics">
+              {quotaPools.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No active quota pools</p>
+              ) : (
+                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4">Provider / Account</TableHead>
+                        <TableHead>Quota Pool Key</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Requests</TableHead>
+                        <TableHead className="text-right">In Tokens</TableHead>
+                        <TableHead className="text-right">Out Tokens</TableHead>
+                        <TableHead className="text-right">Total Tokens</TableHead>
+                        <TableHead className="text-right pr-4">Failed Requests</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {quotaPools.map((q) => (
+                        <TableRow key={q.quotaPoolKey}>
+                          <TableCell className="pl-4 text-sm font-medium">
+                            <span className="flex items-center gap-2">
+                              <PlatformDot platform={q.providerSlug} />
+                              {q.accountName}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs font-mono text-muted-foreground">{q.quotaPoolKey}</TableCell>
+                          <TableCell className="text-xs">
+                            <Badge variant={q.status === 'active' ? 'secondary' : 'outline'}>{q.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{q.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatTokens(q.inputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatTokens(q.outputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">{formatTokens(q.totalTokens)}</TableCell>
+                          <TableCell className={`text-right tabular-nums pr-4 ${q.failedRequests > 0 ? 'text-destructive' : ''}`}>
+                            {q.failedRequests > 0 ? q.failedRequests : '—'}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

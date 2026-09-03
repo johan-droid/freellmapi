@@ -732,7 +732,8 @@ export async function proxyFetch(
               }
             }
             const portStr = parsed.port ? `:${parsed.port}` : '';
-            const pinnedUrl = `${parsed.protocol}//${pinned}${portStr}${parsed.pathname}${parsed.search}`;
+            const hostFormat = pinned.includes(':') ? `[${pinned}]` : pinned;
+            const pinnedUrl = `${parsed.protocol}//${hostFormat}${portStr}${parsed.pathname}${parsed.search}`;
             const originalHost = parsed.hostname;
             const existingHeaders = (init?.headers as Record<string, string>) ?? {};
             init = {

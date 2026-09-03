@@ -81,13 +81,90 @@ providersRouter.get('/', (_req: Request, res: Response) => {
   `).all(...PROVIDER_REGISTRY.map(provider => provider.slug)) as any[];
 
   const stats = new Map(rows.map(row => [row.slug, row]));
-  res.json(PROVIDER_REGISTRY.map(provider => ({
-    ...provider,
-    accountCount: stats.get(provider.slug)?.account_count ?? 0,
-    modelCount: stats.get(provider.slug)?.model_count ?? 0,
-    activeModelCount: stats.get(provider.slug)?.active_model_count ?? 0,
-    unavailableModelCount: stats.get(provider.slug)?.unavailable_model_count ?? 0,
-  })));
+  res.json(PROVIDER_REGISTRY.map(provider => {
+    const def = provider.definition;
+    return {
+      ...provider,
+      website: def?.website,
+      documentationUrl: def?.documentationUrl,
+      keyCreationUrl: def?.auth.keyCreationUrl,
+      region: def?.region ?? 'GLOBAL',
+      jurisdiction: def?.jurisdiction ?? 'non-china',
+      accountCount: stats.get(provider.slug)?.account_count ?? 0,
+      modelCount: stats.get(provider.slug)?.model_count ?? 0,
+      activeModelCount: stats.get(provider.slug)?.active_model_count ?? 0,
+      unavailableModelCount: stats.get(provider.slug)?.unavailable_model_count ?? 0,
+    };
+  }));
+});
+
+providersRouter.get('/:provider', (req: Request, res: Response) => {
+  ensureSchema();
+  const slug = String(req.params.provider);
+  const registry = getProviderRegistryEntry(slug);
+  if (!registry) {
+    res.status(404).json({ error: { message: `Provider '${slug}' not found` } });
+    return;
+  }
+  const def = registry.definition;
+  res.json({
+    ...registry,
+    website: def?.website,
+    documentationUrl: def?.documentationUrl,
+    keyCreationUrl: def?.auth.keyCreationUrl,
+    region: def?.region ?? 'GLOBAL',
+    jurisdiction: def?.jurisdiction ?? 'non-china',
+    auth: def?.auth,
+    capabilities: def?.capabilities,
+    endpoint: def?.endpoint,
+  });
+});
+
+providersRouter.post('/:provider/test', async (req: Request, res: Response) => {
+  ensureSchema();
+  const slug = String(req.params.provider);
+  const registry = getProviderRegistryEntry(slug);
+  if (!registry) {
+    res.status(404).json({ error: { message: `Provider '${slug}' not found` } });
+    return;
+  }
+
+  const apiKey = req.body?.apiKey;
+  const baseUrl = req.body?.baseUrl || registry.baseUrl;
+
+  if (registry.authType !== 'keyless' && !apiKey) {
+    const db = getDb();
+    const account = db.prepare("SELECT id FROM provider_accounts WHERE provider_slug = ? AND status = 'active' LIMIT 1").get(slug);
+    if (!account) {
+      res.status(400).json({ status: 'unauthorized', message: 'No active credentials configured for connection test.' });
+      return;
+    }
+  }
+
+  try {
+    const endpoint = registry.modelListEndpoint
+      ? (registry.modelListEndpoint.startsWith('http') ? registry.modelListEndpoint : `${baseUrl.replace(/\/+$/, '')}${registry.modelListEndpoint}`)
+      : `${baseUrl.replace(/\/+$/, '')}/models`;
+
+    const headers: Record<string, string> = { ...(registry.defaultHeaders ?? {}) };
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+      headers['x-api-key'] = apiKey;
+    }
+
+    const response = await fetch(endpoint, { headers });
+    if (response.ok) {
+      res.json({ status: 'healthy', connected: true, message: `Successfully connected to ${registry.displayName}.` });
+    } else if (response.status === 401 || response.status === 403) {
+      res.json({ status: 'unauthorized', connected: false, message: `Authentication failed (HTTP ${response.status}). Check API Key.` });
+    } else if (response.status === 429) {
+      res.json({ status: 'rate_limited', connected: true, message: 'Provider reached rate limits (HTTP 429).' });
+    } else {
+      res.json({ status: 'unreachable', connected: false, message: `Provider returned HTTP ${response.status}.` });
+    }
+  } catch (err: any) {
+    res.json({ status: 'unreachable', connected: false, message: `Failed to reach endpoint: ${err?.message || err}` });
+  }
 });
 
 providersRouter.get('/quota-pools', (_req: Request, res: Response) => {

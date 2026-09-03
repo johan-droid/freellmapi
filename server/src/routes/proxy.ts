@@ -34,6 +34,10 @@ import { buildModelListing } from '../services/model-listing.js';
 import { detectRequestIntent } from '../services/request-intent.js';
 import { claudeFamilyDiscoveryEntries } from '../services/anthropic-map.js';
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
+import { parseAutoPrefix } from '../services/autoCombo/parser.js';
+import { selectAutoCandidate, buildRoutingContext } from '../services/autoCombo/engine.js';
+import { parseRequestControls } from '../services/autoCombo/requestControls.js';
+import { routePinnedModel } from '../services/router.js';
 
 export const proxyRouter = Router();
 
@@ -45,8 +49,10 @@ const AUTO_MODEL_ID = 'auto';
 
 function isAutoModel(modelId: string | undefined): boolean {
   if (!modelId) return true;
-  const lower = modelId.toLowerCase();
-  return lower === AUTO_MODEL_ID || lower.startsWith(`${AUTO_MODEL_ID}:`);
+  const lower = modelId.toLowerCase().trim();
+  if (lower === AUTO_MODEL_ID || lower.startsWith(`${AUTO_MODEL_ID}:`) || lower.startsWith(`${AUTO_MODEL_ID}/`)) return true;
+  const parsed = parseAutoPrefix(modelId ?? '');
+  return !!parsed?.isAuto;
 }
 
 // timingSafeStringEqual moved to lib/system-prompt.ts (resolveAuth needs it
@@ -365,6 +371,25 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
       }))
     : [];
 
+  // Auto-Combo intelligent variants (spec §3, §23)
+  const autoVariants = [
+    'auto/coding', 'auto/fast', 'auto/cheap', 'auto/reliable', 'auto/offline', 'auto/smart', 'auto/lkgp', 'auto/reasoning', 'auto/vision', 'auto/chat', 'auto/multimodal',
+    'auto/coding:fast', 'auto/coding:cheap', 'auto/reasoning:pro', 'auto/multimodal:free',
+  ];
+  const autoVariantEntries = autoVariants.map(id => ({
+    id,
+    object: 'model' as const,
+    created: 0,
+    owned_by: 'freellmapi',
+    name: `Auto ${id.slice(5) || ' (intelligent routing)'} `,
+    context_window: autoContextWindow,
+    context_length: autoContextWindow,
+    available: autoContextWindow != null,
+    unavailable_reason: autoContextWindow != null ? null : 'no_models',
+    candidate_count: allListed.filter(m => m.available===1).length,
+    capabilities: { vision: true, tools: true, reasoning: true },
+  }));
+
   res.json({
     object: 'list',
     data: [
@@ -394,6 +419,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
         available: autoContextWindow != null,
         unavailable_reason: autoContextWindow != null ? null : 'no_models',
       },
+      ...autoVariantEntries,
       ...claudeFamilyEntries,
       ...profileRows.map(p => ({
         id: `auto:${p.name.toLowerCase()}`,
@@ -1945,6 +1971,40 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     }
   });
 
+  // Pre-parse auto controls for this request
+  const headerControls = parseRequestControls(req);
+  const isAutoCombo = (() => {
+    if (!requestedModel) return false;
+    const trimmed = requestedModel.toLowerCase().trim();
+    if (trimmed === 'auto') return true;
+    if (trimmed.startsWith('auto/')) {
+      const p = parseAutoPrefix(trimmed);
+      return !!(p && p.isAuto && p.isValid);
+    }
+    return false;
+  })();
+  if (isAutoCombo && headerControls.budget != null && headerControls.budgetFallback === 'strict') {
+    try {
+      const ctx = buildRoutingContext({
+        estimatedInputTokens: estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE,
+        estimatedOutputTokens: outputReserve,
+        hasTools: wantsTools,
+        hasVision: hasImage,
+        modelString: requestedModel ?? 'auto',
+        budget: headerControls.budget,
+        budgetFallback: 'strict',
+        mode: headerControls.mode,
+        requestId: requestGroupId,
+        sessionKey: sessionKey || reasoningSessionKey,
+      });
+      const pre: any = selectAutoCandidate(requestedModel ?? 'auto', ctx, undefined);
+      if (pre && pre.error && pre.status === 402) {
+        res.status(402).json({ error: { message: pre.error, type: 'budget_exceeded', code: 'budget_exceeded' } });
+        return;
+      }
+    } catch {}
+  }
+
   await runFallbackLoop({
     maxRetries: MAX_RETRIES,
     state,
@@ -1952,13 +2012,48 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     clientGone: () => clientGone,
     abortInFlight: () => hedgeAbort.abort(newHedgeAbortError()),
     route: () => {
-      // When a handoff could fire this turn, pad the token estimate so the router's
-      // context-window and TPM checks account for the extra system message overhead.
-      // We don't know the selected model key until after routeRequest() returns, so
-      // the padding is conservative on turns where injection is *possible* (a prior
-      // model is on record). Turns where injection can't happen — every turn 1, and
-      // sessions that never switched — pay no headroom tax.
       const routingEstimate = handoffPossible ? estimatedTotal + HANDOFF_MAX_TOKENS : estimatedTotal;
+      if (isAutoCombo) {
+        const ctx = buildRoutingContext({
+          estimatedInputTokens: estimatedInputTokens + imageCount * IMAGE_TOKEN_ESTIMATE,
+          estimatedOutputTokens: outputReserve,
+          hasTools: wantsTools,
+          hasVision: hasImage,
+          modelString: requestedModel ?? 'auto',
+          budget: headerControls.budget ?? null,
+          budgetFallback: headerControls.budgetFallback,
+          mode: headerControls.mode,
+          slaTargetP95Ms: headerControls.slaTargetP95Ms,
+          slaMaxErrorRate: headerControls.slaMaxErrorRate,
+          slaMaxCostPer1MTokens: headerControls.slaMaxCostPer1MTokens,
+          slaHardConstraints: headerControls.slaHardConstraints,
+          requestId: requestGroupId,
+          sessionKey: sessionKey || reasoningSessionKey,
+        });
+        const result: any = selectAutoCandidate(
+          requestedModel ?? 'auto',
+          ctx,
+          state.skipModels.size > 0 ? state.skipModels : undefined,
+          state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined,
+        );
+        if (result && result.error) {
+          const isExplicitAuto = requestedModel && (requestedModel.startsWith('auto/') || requestedModel.startsWith('auto:'));
+          if (isExplicitAuto || result.status === 402 || result.status === 413) {
+            const err: any = new Error(result.error);
+            err.status = result.status;
+            throw err;
+          }
+        }
+        if (result && result.candidate) {
+          const skipKeys = state.skipKeys.size > 0 ? state.skipKeys : undefined;
+          const routeRes = routePinnedModel(result.candidate.modelDbId, routingEstimate, skipKeys);
+          if (routeRes) {
+            (routeRes as any)._autoDecision = result.decision;
+            return routeRes;
+          }
+          state.skipModels.add(result.candidate.modelDbId);
+        }
+      }
       return routeRequest(routingEstimate, state.skipKeys.size > 0 ? state.skipKeys : undefined, preferredModel, hasImage, wantsTools, state.skipModels.size > 0 ? state.skipModels : undefined, groupChain ?? resolvedChain?.chain, samplingParams.response_format !== undefined, state.skipPlatforms.size > 0 ? state.skipPlatforms : undefined, outputReserve);
     },
     dispatch: async (route, attempt, ctx) => {

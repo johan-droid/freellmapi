@@ -21,6 +21,7 @@ export function ModelsTabs() {
       <NavLink to="/models/video" className={({ isActive }) => tab(isActive)}>{t('models.videoTab')}</NavLink>
       <NavLink to="/models/audio" className={({ isActive }) => tab(isActive)}>{t('models.audioTab')}</NavLink>
       <NavLink to="/models/fusion" className={({ isActive }) => tab(isActive)}>{t('models.fusionTab')}</NavLink>
+      <NavLink to="/models/auto" className={({ isActive }) => tab(isActive)}>Auto Routing</NavLink>
     </div>
   )
 }

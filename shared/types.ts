@@ -61,115 +61,74 @@ export interface ImportSelectedResponse {
 // SambaNova was dropped in V23 (free tier permanently retired — 402
 // "payment method required" once the one-time $5 trial credit lapses).
 export type Platform =
+  | 'openai'
+  | 'anthropic'
   | 'google'
   | 'groq'
   | 'cerebras'
-  // B.AI — OpenAI-compatible gateway. Its catalog row is a live-tested,
-  // limited-time 0-credit promotion, not a recurring free allowance.
-  | 'bai'
-  // AnyAPI — OpenAI-compatible gateway. Free tier is $0/no card/recurring but
-  // capped at 100K tokens/day over "free and basic" models only; no RPM/RPD is
-  // published. Catalog rows live in the hosted catalog (premium now, free after
-  // 30 days).
-  | 'anyapi'
-  | 'nvidia'
-  | 'mistral'
   | 'sambanova'
+  | 'fireworks'
+  | 'together'
   | 'openrouter'
   | 'github'
-  | 'cohere'
+  | 'mistral'
+  | 'nvidia'
   | 'cloudflare'
+  | 'huggingface'
+  | 'replicate'
+  | 'ai21'
+  | 'cohere'
+  | 'friendli'
+  | 'featherless'
+  | 'baseten'
+  | 'deepinfra'
+  | 'aws_bedrock'
+  | 'google_vertex'
+  | 'azure'
+  | 'watsonx'
+  | 'scaleway'
+  | 'ollama_local'
+  | 'lmstudio'
+  | 'llamacpp'
+  | 'vllm'
+  | 'hyperbolic'
+  | 'lambda'
+  | 'nebius'
+  | 'nscale'
+  | 'nous'
+  | 'llama_api'
+  | 'perplexity'
+  | 'xai'
+  | 'liquid'
+  | 'upstage'
+  | 'morph'
+  | 'jina'
+  | 'voyage'
+  | 'nomic'
+  | 'bai'
+  | 'anyapi'
   | 'zhipu'
   | 'ollama'
   | 'kilo'
   | 'pollinations'
   | 'llm7'
-  | 'huggingface'
-  // OpenCode Zen — OpenAI-compatible gateway. Free promotional models require a
-  // free (no-card) account key from opencode.ai/auth; see migrateModelsV18.
   | 'opencode'
-  // OVHcloud AI Endpoints — OpenAI-compatible, keyless anonymous tier
-  // (2 req/min per IP per model); see migrateModelsV26.
   | 'ovh'
-  // Agnes AI (Sapiens AI) — OpenAI-compatible (LiteLLM + vLLM backend). Serves
-  // its own proprietary Agnes models; the free key comes from
-  // platform.agnes-ai.com (no card).
   | 'agnes'
-  // Reka — OpenAI-compatible. Native multimodal models (reka-edge takes
-  // image/video); free via a recurring monthly credit grant, key from
-  // platform.reka.ai (no card).
   | 'reka'
-  // SiliconFlow — OpenAI-compatible. Registered for its FREE generative-media
-  // models (FLUX.1-schnell image, CosyVoice2 TTS) routed via services/media.ts;
-  // chat is supported too. Key from siliconflow.com (no card).
   | 'siliconflow'
-  // Routeway — OpenAI-compatible aggregator. Free ':free' models ($0) on a
-  // rate-limited pool (~5 rpm observed); requires a browser User-Agent (CF
-  // blocks others). Key from routeway.ai (no card).
   | 'routeway'
-  // BazaarLink — OpenAI-compatible aggregator. Free 'auto:free' route picks an
-  // available zero-cost model. Key from bazaarlink.ai (no card).
   | 'bazaarlink'
-  // AINative Studio — OpenAI-compatible aggregator. Advertises a recurring
-  // ~10M tokens/month free allocation (no card); quota unverified. Key from
-  // ainative.studio.
   | 'ainative'
-  // Aion Labs — OpenAI-compatible aggregator with a no-card free API key.
-  // Catalog rows live in the Oracle catalog (premium now, free after 30 days).
   | 'aion'
-  // Requesty — OpenAI-compatible router with no-card free models/credits.
-  // Catalog rows live in the Oracle catalog (premium now, free after 30 days).
   | 'requesty'
-  // NavyAI — OpenAI-compatible unified API. Free plan is 150K tokens/day and
-  // 20 RPM; catalog rows live in the Oracle catalog (premium now, free after 30 days).
   | 'navy'
-  // NaraRouter — OpenAI-compatible aggregator. Free account key from
-  // router.bynara.id after Telegram channel/link verification; free-plan routes
-  // reset daily and are catalog-managed (premium now, free after 30 days).
   | 'nara'
-  // SEA-LION (AI Singapore) — OpenAI-compatible first-party API. Free key
-  // (Google sign-in, no card, no region wall) at 10 RPM; catalog rows live in
-  // the Oracle catalog (premium now, free after 30 days).
   | 'sealion'
-  // OrcaRouter — OpenAI-compatible aggregator (api.orcarouter.ai/v1). Free key
-  // from orcarouter.ai (no card); recurring rate-limited free aliases at $0
-  // (never fall back to paid). Catalog rows live in the Oracle catalog
-  // (premium now, free after the 30-day model-age gate).
   | 'orcarouter'
-  // UnoRouter (unorouter.com) — OpenAI-compatible aggregator. The web app is a
-  // Next.js site at unorouter.com; the API lives at api.unorouter.com/v1. Free
-  // key from unorouter.com (no card); free models carry a `:free` suffix and a
-  // per-minute rate limit (429 on cap, e.g. "1 request(s) every 1 min").
-  // Live-probed 2026-08-23: /v1/models is public without a key but 401s on a
-  // wrong key, and /v1/chat/completions 401s without a key, so default key
-  // validation works. Catalog rows live in the hosted catalog (premium now,
-  // free after the 30-day model-age gate).
   | 'unorouter'
-  // xKiro (xkiro.com) — OpenAI-compatible gateway at api.xkiro.com/v1. Free key
-  // from xkiro.com (no card); free plan is 5M tokens/day on its free models,
-  // paid models 403 on a free key.
-  // /v1/models is public (200 with no key), so key validation must probe
-  // /v1/usage, which 401s on a missing/invalid ClientApiKey. Catalog rows live
-  // in the hosted catalog (premium now, free after the 30-day model-age gate).
   | 'xkiro'
-  // ModelScope (魔搭社区, Alibaba) — OpenAI-compatible inference API
-  // (api-inference.modelscope.cn/v1). Free tier is 2000 requests/day
-  // account-wide, but calls only work after the ModelScope account is bound to
-  // an Alibaba Cloud CHINA-site (cn) account with Chinese real-name
-  // verification — tokens mint without binding, then every call 401s. Catalog
-  // rows land after community testing confirms per-model behavior (#581).
   | 'modelscope'
-  // ── Chinese domestic providers (#922/#923/#924) ────────────────────────────
-  // All four need Chinese real-name verification (实名认证) on the cloud account
-  // before a key will serve traffic, the same wall ModelScope hits above.
-  // LongCat is the exception worth knowing: its platform accepts an email
-  // signup from outside mainland China.
-  //
-  // Baidu Qianfan (百度千帆) — OpenAI-compatible (https://qianfan.baidubce.com/v2).
-  // The ERNIE-Speed / ERNIE-Lite / ERNIE-Tiny series are free indefinitely via
-  // pay-as-you-go billing rather than a token pool, so the ceiling is rate
-  // limits, not a balance. Baidu calls the arrangement "long-term". Real-name
-  // auth (individual or enterprise) required.
   | 'qianfan'
   // Volcengine Ark (火山方舟, ByteDance) — OpenAI-compatible
   // (https://ark.cn-beijing.volces.com/api/v3). Individual developers get a

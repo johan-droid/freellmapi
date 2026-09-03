@@ -425,8 +425,8 @@ describe('Fallback API', () => {
     expect(firstTwo).toHaveLength(2);
 
     const profileId = Number(db.prepare(`
-      INSERT INTO profiles (name, type, sort_order)
-      VALUES ('Routing Profile', 'custom', 999)
+      INSERT INTO profiles (name, type, sort_order, auto_include_new_models)
+      VALUES ('Routing Profile', 'custom', 999, 0)
     `).run().lastInsertRowid);
     db.prepare(`
       INSERT INTO profile_models (profile_id, model_db_id, priority, enabled)
@@ -440,8 +440,9 @@ describe('Fallback API', () => {
     try {
       const { status, body } = await request(app, 'GET', '/api/fallback');
       expect(status).toBe(200);
-      expect(body).toHaveLength(1);
-      expect(body[0].modelDbId).toBe(firstTwo[1].id);
+      const enabledModels = body.filter((r: any) => r.enabled);
+      expect(enabledModels).toHaveLength(1);
+      expect(enabledModels[0].modelDbId).toBe(firstTwo[1].id);
     } finally {
       db.prepare("DELETE FROM settings WHERE key = 'active_profile_id'").run();
       db.prepare('DELETE FROM profile_models WHERE profile_id = ?').run(profileId);

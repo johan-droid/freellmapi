@@ -29,6 +29,14 @@ function getSinceTimestamp(range: string): string {
   const now = Date.now();
 
   switch (range) {
+    case '5m':
+      return toSqliteDateTime(now - 5 * 60 * 1000);
+    case '15m':
+      return toSqliteDateTime(now - 15 * 60 * 1000);
+    case '1h':
+      return toSqliteDateTime(now - 60 * 60 * 1000);
+    case '6h':
+      return toSqliteDateTime(now - 6 * 60 * 60 * 1000);
     case '24h':
       return toSqliteDateTime(now - 24 * 60 * 60 * 1000);
     case '30d':
@@ -179,33 +187,46 @@ analyticsRouter.get('/summary', (req: Request, res: Response) => {
 
   const lifetimeFirst = readLifetimeSettings();
 
+  const extraStatsRow = db.prepare(`
+    SELECT
+      COUNT(DISTINCT r.platform) as active_providers,
+      SUM(CASE WHEN r.error LIKE '%429%' OR r.error LIKE '%rate limit%' THEN 1 ELSE 0 END) as rate_429_count,
+      SUM(CASE WHEN (SELECT COUNT(*) FROM request_attempts a WHERE a.request_id = r.id) > 1 THEN 1 ELSE 0 END) as fallback_count
+    FROM requests r
+    WHERE r.created_at >= ?
+  `).get(since) as { active_providers: number | null; rate_429_count: number | null; fallback_count: number | null };
+
+  const inTokens = aggregate.total_input_tokens ?? 0;
+  const outTokens = aggregate.total_output_tokens ?? 0;
+  const totalTokens = inTokens + outTokens;
+  const errorRate = totalRequests > 0 ? ((aggregate.error_count ?? 0) / totalRequests) * 100 : 0;
+  const rate429Count = extraStatsRow?.rate_429_count ?? 0;
+  const rate429Rate = totalRequests > 0 ? (rate429Count / totalRequests) * 100 : 0;
+  const fallbackCount = extraStatsRow?.fallback_count ?? 0;
+  const fallbackRate = totalRequests > 0 ? (fallbackCount / totalRequests) * 100 : 0;
+  const activeProvidersCount = extraStatsRow?.active_providers ?? 0;
+
   res.json({
     totalRequests,
+    totalTokens,
     successRate: Math.round(successRate * 10) / 10,
-    totalInputTokens: aggregate.total_input_tokens ?? 0,
-    totalOutputTokens: aggregate.total_output_tokens ?? 0,
+    errorRate: Math.round(errorRate * 10) / 10,
+    rate429Count,
+    rate429Rate: Math.round(rate429Rate * 10) / 10,
+    fallbackCount,
+    fallbackRate: Math.round(fallbackRate * 10) / 10,
+    activeProvidersCount,
+    totalInputTokens: inTokens,
+    totalOutputTokens: outTokens,
     avgLatencyMs: Math.round(latencyRow?.avg_latency_ms ?? 0),
-    // Latency spread (raw rows): p50 typical, p95 tail. Null when the raw
-    // window is empty.
     p50LatencyMs,
     p95LatencyMs,
-    // Average streaming time-to-first-token over rows that recorded it; null
-    // when none did (non-streaming traffic or pruned window).
     avgTtfbMs,
-    // Chat vs embedding request split for the selected window.
     requestTypeCounts,
     estimatedCostSavings: Math.round((savings.est_savings ?? 0) * 100) / 100,
-    // Pinned = requests where the client named a specific model (not 'auto').
-    // Honored = the pinned model actually served it; the difference is
-    // failovers that overrode the pin.
     pinnedRequests: pinRow.pinned_count ?? 0,
     pinHonoredRequests: pinRow.pin_honored_count ?? 0,
-    // First-ever request timestamp (lifetime, never pruned). Falls back to
-    // the oldest hour in the current window when lifetime is not yet seeded.
     firstRequestAt: lifetimeFirst ?? aggregate.first_request_at ?? null,
-    // Lifetime total since install — useful when the user wants to see "all
-    // time" alongside the selected range window. Sourced from settings so it
-    // survives the raw-row prune entirely.
     lifetimeTotalRequests: Number((db.prepare(`SELECT value FROM settings WHERE key='total_requests'`).get() as { value?: string } | undefined)?.value ?? 0) || 0,
   });
 });

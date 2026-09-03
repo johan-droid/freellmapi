@@ -43,6 +43,7 @@ import PremiumPage from '@/pages/PremiumPage'
 import QuotaPoolsPage from '@/pages/QuotaPoolsPage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import AgentsPage from '@/pages/AgentsPage'
+import AutoRoutingPage from '@/pages/AutoRoutingPage'
 
 // Every failed mutation surfaces as an error toast, so no action fails
 // silently. A page that already shows the failure inline can opt out with
@@ -76,6 +77,7 @@ const modelItems = [
   { to: '/models/video', labelKey: 'models.videoTab' },
   { to: '/models/audio', labelKey: 'models.audioTab' },
   { to: '/models/fusion', labelKey: 'models.fusionTab' },
+  { to: '/models/auto', labelKey: 'Auto Routing' },
 ]
 
 // The pages that hang off "Analytics". Logs is reachable only from here — it is
@@ -423,6 +425,7 @@ function App() {
                       <Route path="/models/pools" element={<QuotaPoolsPage />} />
                       <Route path="/models/chat/:id" element={<ModelDetailPage />} />
                       <Route path="/models/fusion" element={<FusionPage />} />
+                      <Route path="/models/auto" element={<AutoRoutingPage />} />
                       <Route path="/models/embeddings" element={<EmbeddingsPage />} />
                       <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
                       <Route path="/models/image" element={<ImagePage />} />

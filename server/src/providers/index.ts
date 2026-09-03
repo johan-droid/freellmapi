@@ -15,10 +15,15 @@ function register(provider: BaseProvider) {
   providers.set(provider.platform, provider);
 }
 
-// Google - unique Gemini API format. Gemma reasoning variants take 20-60s on
-// cold start; the default 15s false-flags them as broken. 60s covers the
-// bulk; per-call overrides via CompletionOptions.timeoutMs still win.
+// Google - unique Gemini API format
 register(new GoogleProvider({ timeoutMs: 60_000 }));
+
+// OpenAI - official OpenAI API
+register(new OpenAICompatProvider({
+  platform: 'openai',
+  name: 'OpenAI',
+  baseUrl: 'https://api.openai.com/v1',
+}));
 
 // Groq - OpenAI-compatible
 register(new OpenAICompatProvider({
@@ -32,6 +37,231 @@ register(new OpenAICompatProvider({
   platform: 'cerebras',
   name: 'Cerebras',
   baseUrl: 'https://api.cerebras.ai/v1',
+}));
+
+// SambaNova - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'sambanova',
+  name: 'SambaNova',
+  baseUrl: 'https://api.sambanova.ai/v1',
+}));
+
+// Fireworks AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'fireworks',
+  name: 'Fireworks AI',
+  baseUrl: 'https://api.fireworks.ai/inference/v1',
+}));
+
+// Together AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'together',
+  name: 'Together AI',
+  baseUrl: 'https://api.together.xyz/v1',
+}));
+
+// Replicate - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'replicate',
+  name: 'Replicate',
+  baseUrl: 'https://api.replicate.com/v1',
+}));
+
+// AI21 Labs - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'ai21',
+  name: 'AI21 Labs',
+  baseUrl: 'https://api.ai21.com/studio/v1',
+}));
+
+// FriendliAI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'friendli',
+  name: 'FriendliAI',
+  baseUrl: 'https://inference.friendli.ai/v1',
+}));
+
+// Featherless AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'featherless',
+  name: 'Featherless AI',
+  baseUrl: 'https://api.featherless.ai/v1',
+}));
+
+// Baseten - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'baseten',
+  name: 'Baseten',
+  baseUrl: 'https://bridge.baseten.co/v1',
+}));
+
+// DeepInfra - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'deepinfra',
+  name: 'DeepInfra',
+  baseUrl: 'https://api.deepinfra.com/v1/openai',
+}));
+
+// Azure OpenAI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'azure',
+  name: 'Azure OpenAI',
+  baseUrl: 'https://azure.openai.com',
+}));
+
+// Scaleway - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'scaleway',
+  name: 'Scaleway',
+  baseUrl: 'https://api.scaleway.com/ai/v1',
+}));
+
+// AWS Bedrock - OpenAI-compatible adapter
+register(new OpenAICompatProvider({
+  platform: 'aws_bedrock',
+  name: 'AWS Bedrock',
+  baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com',
+}));
+
+// Google Vertex AI - OpenAI-compatible adapter
+register(new OpenAICompatProvider({
+  platform: 'google_vertex',
+  name: 'Google Vertex AI',
+  baseUrl: 'https://us-central1-aiplatform.googleapis.com',
+}));
+
+// IBM watsonx - OpenAI-compatible adapter
+register(new OpenAICompatProvider({
+  platform: 'watsonx',
+  name: 'IBM watsonx',
+  baseUrl: 'https://us-south.ml.cloud.ibm.com',
+}));
+
+// Local Providers
+register(new OpenAICompatProvider({
+  platform: 'ollama_local',
+  name: 'Ollama Local',
+  baseUrl: 'http://localhost:11434/v1',
+  keyless: true,
+}));
+
+register(new OpenAICompatProvider({
+  platform: 'lmstudio',
+  name: 'LM Studio',
+  baseUrl: 'http://localhost:1234/v1',
+  keyless: true,
+}));
+
+register(new OpenAICompatProvider({
+  platform: 'llamacpp',
+  name: 'llama.cpp',
+  baseUrl: 'http://localhost:8080/v1',
+  keyless: true,
+}));
+
+register(new OpenAICompatProvider({
+  platform: 'vllm',
+  name: 'vLLM Engine',
+  baseUrl: 'http://localhost:8000/v1',
+  keyless: true,
+}));
+
+// Hyperbolic - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'hyperbolic',
+  name: 'Hyperbolic',
+  baseUrl: 'https://api.hyperbolic.xyz/v1',
+}));
+
+// Lambda AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'lambda',
+  name: 'Lambda AI',
+  baseUrl: 'https://api.lambdalabs.com/v1',
+}));
+
+// Nebius AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'nebius',
+  name: 'Nebius AI Studio',
+  baseUrl: 'https://api.studio.nebius.ai/v1',
+}));
+
+// nScale - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'nscale',
+  name: 'nScale',
+  baseUrl: 'https://api.nscale.com/v1',
+}));
+
+// Nous Research - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'nous',
+  name: 'Nous Research',
+  baseUrl: 'https://api.nousresearch.com/v1',
+}));
+
+// Meta Llama API - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'llama_api',
+  name: 'Meta Llama API',
+  baseUrl: 'https://api.llama.com/v1',
+}));
+
+// Perplexity AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'perplexity',
+  name: 'Perplexity AI',
+  baseUrl: 'https://api.perplexity.ai',
+}));
+
+// xAI (Grok) - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'xai',
+  name: 'xAI (Grok)',
+  baseUrl: 'https://api.x.ai/v1',
+}));
+
+// Liquid AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'liquid',
+  name: 'Liquid AI',
+  baseUrl: 'https://api.liquid.ai/v1',
+}));
+
+// Upstage Solar - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'upstage',
+  name: 'Upstage Solar',
+  baseUrl: 'https://api.upstage.ai/v1/solar',
+}));
+
+// Morph Labs - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'morph',
+  name: 'Morph Labs',
+  baseUrl: 'https://api.morph.labs/v1',
+}));
+
+// Jina AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'jina',
+  name: 'Jina AI',
+  baseUrl: 'https://api.jina.ai/v1',
+}));
+
+// Voyage AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'voyage',
+  name: 'Voyage AI',
+  baseUrl: 'https://api.voyageai.com/v1',
+}));
+
+// Nomic AI - OpenAI-compatible
+register(new OpenAICompatProvider({
+  platform: 'nomic',
+  name: 'Nomic AI',
+  baseUrl: 'https://api-atlas.nomic.ai/v1',
 }));
 
 // B.AI — OpenAI-compatible gateway. Provider support is first-class, but the

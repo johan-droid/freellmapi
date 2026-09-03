@@ -499,7 +499,10 @@ fallbackRouter.post('/sort/:preset', (req: Request, res: Response) => {
       res.status(400).json({ error: { message: `Unknown preset: ${preset}. Use: intelligence, speed, budget` } });
       return;
     }
-    models = activeProfileId != null
+    const profileCount = activeProfileId != null
+      ? (db.prepare('SELECT COUNT(*) as cnt FROM profile_models WHERE profile_id = ?').get(activeProfileId) as any)?.cnt ?? 0
+      : 0;
+    models = (activeProfileId != null && profileCount > 0)
       ? db.prepare(`
         SELECT m.id
         FROM profile_models pm
@@ -507,7 +510,7 @@ fallbackRouter.post('/sort/:preset', (req: Request, res: Response) => {
         WHERE pm.profile_id = ? AND m.enabled = 1
         ORDER BY ${orderBy}
       `).all(activeProfileId) as { id: number }[]
-      : db.prepare(`SELECT m.id FROM models m ORDER BY ${orderBy}`).all() as { id: number }[];
+      : db.prepare(`SELECT m.id FROM models m WHERE m.enabled = 1 ORDER BY ${orderBy}`).all() as { id: number }[];
   }
   // Same upsert story as the PUT above: a preset sorts the list the dashboard
   // shows, which is the whole catalog seen through the chain, so a model the

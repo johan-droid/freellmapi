@@ -122,7 +122,7 @@ describe('Router', () => {
     const plain = routeRequest(1000);
     expect(plain.modelDbId).toBe(flash!.id);
 
-    const coding = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+    const coding = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, false, undefined, 0, {
       kind: 'coding',
       coding: true,
       agentic: false,
@@ -180,7 +180,7 @@ describe('Router', () => {
     const plain = routeRequest(1000);
     expect(plain.modelDbId).toBe(flash!.id);
 
-    const research = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+    const research = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, false, undefined, 0, {
       kind: 'research',
       coding: false,
       agentic: false,
@@ -235,7 +235,7 @@ describe('Router', () => {
     const plain = routeRequest(1000);
     expect(plain.modelDbId).toBe(coder!.id);
 
-    const chat = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, {
+    const chat = routeRequest(1000, undefined, undefined, false, false, undefined, undefined, false, undefined, 0, {
       kind: 'chat',
       coding: false,
       agentic: false,

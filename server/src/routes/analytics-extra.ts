@@ -324,3 +324,39 @@ analyticsExtraRouter.get('/broker/scores', (_req: Request, res: Response) => {
     updatedAt: row.updated_at,
   })));
 });
+
+analyticsExtraRouter.get('/quota-pools', (_req: Request, res: Response) => {
+  ensureSchema();
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      pa.id as account_id,
+      pa.provider_slug,
+      pa.display_name as account_name,
+      pa.status as account_status,
+      COALESCE(SUM(d.request_count), 0) as requests,
+      COALESCE(SUM(d.input_tokens), 0) as input_tokens,
+      COALESCE(SUM(d.output_tokens), 0) as output_tokens,
+      COALESCE(SUM(d.total_tokens), 0) as total_tokens,
+      COALESCE(SUM(d.failed_requests), 0) as failed_requests,
+      MAX(d.usage_date) as last_activity
+    FROM provider_accounts pa
+    LEFT JOIN provider_usage_daily d ON d.provider_account_id = pa.id
+    GROUP BY pa.id, pa.provider_slug, pa.display_name, pa.status
+    ORDER BY total_tokens DESC, requests DESC
+  `).all() as any[];
+
+  res.json(rows.map(r => ({
+    accountId: r.account_id,
+    providerSlug: r.provider_slug,
+    accountName: r.account_name,
+    status: r.account_status,
+    quotaPoolKey: `${r.provider_slug}:${r.account_id}`,
+    requests: r.requests,
+    inputTokens: r.input_tokens,
+    outputTokens: r.output_tokens,
+    totalTokens: r.total_tokens,
+    failedRequests: r.failed_requests,
+    lastActivity: r.last_activity,
+  })));
+});

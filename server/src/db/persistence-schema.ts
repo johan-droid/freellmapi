@@ -241,6 +241,15 @@ export function ensurePersistenceSchema(db: Db): void {
       value_json TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS auto_candidate_overrides (
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      excluded INTEGER NOT NULL DEFAULT 1,
+      reason TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (provider, model)
+    );
   `);
 
   // Non-destructive compatibility migrations for databases created before this table grew.
@@ -257,6 +266,17 @@ export function ensurePersistenceSchema(db: Db): void {
   if (!hasColumn(db, 'provider_catalog_models', 'last_probe_at')) {
     db.prepare('ALTER TABLE provider_catalog_models ADD COLUMN last_probe_at TEXT').run();
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auto_candidate_overrides (
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      excluded INTEGER NOT NULL DEFAULT 1,
+      reason TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (provider, model)
+    );
+  `);
 
   seedClientProfiles(db);
 }

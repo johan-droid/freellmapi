@@ -1076,7 +1076,8 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
     try {
       route = hooks.route(attempt);
     } catch (routeErr) {
-      const exhaustion = lastError
+      const isHardErr = (routeErr as any)?.status === 413 || (routeErr as any)?.status === 402 || (routeErr as any)?.code === 'context_length_exceeded';
+      const exhaustion = (lastError && !isHardErr)
         ? exhaustedRetryError(lastError, undefined, { attempts })
         : routingExhaustionBody(routeErr);
       hooks.onRoutingExhausted(lastError, routeErr, exhaustion, { attempts, timedOut: false });
