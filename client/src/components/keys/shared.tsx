@@ -31,6 +31,7 @@ export const PLATFORMS: { value: Platform; label: string; url: string; keyless?:
   { value: 'google', label: 'Google AI Studio', url: 'https://aistudio.google.com/app/apikey' },
   { value: 'groq', label: 'Groq', url: 'https://console.groq.com/keys' },
   { value: 'cerebras', label: 'Cerebras', url: 'https://cloud.cerebras.ai/platform/keys' },
+  { value: 'sail', label: 'Sail Research ($5 monthly with payment method)', url: 'https://app.sailresearch.com' },
   { value: 'sambanova', label: 'SambaNova', url: 'https://cloud.sambanova.ai/apis' },
   { value: 'fireworks', label: 'Fireworks AI', url: 'https://fireworks.ai/account/api-keys' },
   { value: 'together', label: 'Together AI', url: 'https://api.together.xyz/settings/api-keys' },

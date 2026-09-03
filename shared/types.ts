@@ -66,6 +66,9 @@ export type Platform =
   | 'google'
   | 'groq'
   | 'cerebras'
+  | 'sail'
+  | 'bai'
+  | 'anyapi'
   | 'sambanova'
   | 'fireworks'
   | 'together'
@@ -376,6 +379,11 @@ export interface ChatMessage {
   // (DeepSeek on OpenCode Zen) require it to be replayed verbatim on the next
   // turn or they 400; the proxy preserves and forwards it. See issue #255.
   reasoning_content?: string;
+  // Moonshot's "partial" prefill flag on an assistant turn: when true, the
+  // model continues the given text instead of starting a fresh turn. Only
+  // forwarded to models that understand it (Moonshot/Kimi); stripped for all
+  // other providers. See issue #1038.
+  partial?: boolean;
 }
 
 export interface ChatCompletionRequest {
@@ -412,6 +420,10 @@ export interface TokenUsage {
   // to its chars/4 estimate when absent. (#764)
   completion_tokens_details?: { reasoning_tokens?: number };
   prompt_tokens_details?: { cached_tokens?: number };
+  // Gateway-synthesized block (upstream never sent usage): flagged so a
+  // cost-accounting client can tell it apart from the upstream's real
+  // counts. (#1084)
+  estimated?: boolean;
 }
 
 export interface ChatCompletionResponse {

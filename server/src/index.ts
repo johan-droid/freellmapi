@@ -125,6 +125,11 @@ async function main() {
     });
   };
 
+  const tuneKeepAlive = (s: http.Server | https.Server) => {
+    s.keepAliveTimeout = 75_000;
+    s.headersTimeout = 76_000;
+  };
+
   const tlsOptions = config.tls
     ? { cert: fs.readFileSync(config.tls.certPath), key: fs.readFileSync(config.tls.keyPath) }
     : null;
@@ -134,6 +139,7 @@ async function main() {
   } else {
     server = app.listen(Number(PORT), HOST, onReady(HOST));
   }
+  tuneKeepAlive(server);
 
   server.on('close', stopSnapshots);
   server.on('error', (err: NodeJS.ErrnoException) => {
@@ -148,6 +154,7 @@ async function main() {
       } else {
         server = app.listen(Number(PORT), '0.0.0.0', onReady('0.0.0.0'));
       }
+      tuneKeepAlive(server);
       return;
     }
     console.error('\n[server] Failed to start:\n  ' + (err?.message ?? err) + '\n');
