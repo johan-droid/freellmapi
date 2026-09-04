@@ -159,11 +159,12 @@ function inferPoolForPlatform(platform: Platform, modelId?: string | null): stri
   if (platform === 'anyapi') return 'anyapi::free';
   // ModelScope: one 2000-requests/day quota across the whole account.
   if (platform === 'modelscope') return 'modelscope::account';
+  if (isSharedPool(platform)) return `${platform}::account`;
   return normalizedModelId ? `${platform}::${normalizedModelId}` : `${platform}::account`;
 }
 
 function isSharedPool(platform: Platform): boolean {
-  return ['openrouter', 'google', 'groq', 'cerebras', 'sail', 'bai', 'sambanova', 'nvidia', 'mistral', 'github', 'cohere', 'cloudflare', 'zhipu', 'ollama', 'kilo', 'pollinations', 'llm7', 'huggingface', 'opencode', 'routeway', 'bazaarlink', 'ainative', 'aion', 'requesty', 'navy', 'nara', 'sealion', 'orcarouter', 'unorouter', 'xkiro', 'anyapi', 'modelscope', 'aihorde'].includes(platform);
+  return ['openrouter', 'google', 'groq', 'cerebras', 'sail', 'bai', 'sambanova', 'nvidia', 'mistral', 'github', 'cohere', 'cloudflare', 'zhipu', 'ollama', 'kilo', 'pollinations', 'llm7', 'huggingface', 'opencode', 'routeway', 'bazaarlink', 'ainative', 'aion', 'requesty', 'navy', 'nara', 'sealion', 'orcarouter', 'unorouter', 'xkiro', 'anyapi', 'modelscope', 'aihorde', 'featherless', 'baseten', 'deepinfra', 'hyperbolic', 'lambda', 'nebius', 'nscale', 'nous', 'llama_api', 'perplexity', 'xai', 'liquid', 'upstage', 'morph', 'aws_bedrock', 'google_vertex', 'azure', 'watsonx', 'scaleway', 'ollama_local', 'lmstudio', 'llamacpp', 'vllm', 'qianfan', 'volcengine', 'longcat', 'xfyun', 'fireworks', 'together', 'replicate', 'ai21', 'jina', 'voyage', 'nomic', 'agnes', 'reka', 'siliconflow', 'ovh'].includes(platform);
 }
 
 type HeaderSpec = { metric: QuotaMetric; limit: string; remaining?: string; reset?: string; strategy?: QuotaResetStrategy };

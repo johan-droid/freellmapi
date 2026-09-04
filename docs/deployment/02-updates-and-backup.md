@@ -50,6 +50,11 @@ FREEAPI_DB_BACKUP_INTERVAL_MS=300000
 
 Restore semantics: when the configured database file is missing at startup, FreeLLMAPI restores the backup before migrations run; while the server is running it uploads a fresh encrypted backup periodically. On hosts with ephemeral disks this is the primary protection.
 
+### PostgreSQL / Neon & Remote Persistence
+When  is configured (e.g., Neon PostgreSQL), FreeLLMAPI automatically syncs SQLite snapshots to PostgreSQL.
+To conserve compute hours on Neon's free tier (100 compute hours/month), FreeLLMAPI tracks SHA-256 content hashes of the SQLite database and ONLY executes remote uploads when data actually changes. The default snapshot schedule is configured for energy efficiency at 1800 seconds (30 minutes), allowing Neon compute endpoints to auto-suspend during idle periods. Interval settings:
+-  (or  /  / , default: 1800s)
+
 Volume snapshot (plain Docker approach). The standard pattern works unchanged:
 
 ```bash
