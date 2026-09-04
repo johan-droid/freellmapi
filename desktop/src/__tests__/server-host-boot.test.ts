@@ -184,7 +184,7 @@ describe('desktop server boot sequence (#949)', () => {
     );
     // Env-gated (FREEAPI_DB_BACKUP_*): a GUI-launched packaged app inherits no
     // shell environment, so these can never activate on desktop.
-    const SKIPPED = new Set(['restoreDbBackupIfNeeded', 'startDbBackupPump']);
+    const SKIPPED = new Set(['restoreDbBackupIfNeeded', 'startDbBackupPump', 'restoreDatabaseBeforeBoot', 'startDatabaseSnapshotLoop']);
     // Regex sanity floor — an index.ts restructure must not blank this test.
     expect(steps.size).toBeGreaterThanOrEqual(10);
 

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { spawnSync, spawn } from 'child_process';
@@ -32,6 +33,7 @@ function hasRemoteSnapshotConfig(): boolean {
 let persistenceRestoreStatus: 'restored' | 'skipped' | 'fresh' = 'fresh';
 let lastBackupTime: string | null = null;
 let lastBackupError: string | null = null;
+let lastPushedHash: string | null = null;
 
 export function getPersistenceStatus() {
   const dbPath = getDatabasePath();
@@ -268,20 +270,36 @@ export function startDatabaseSnapshotLoop(): () => void {
     return () => undefined;
   }
 
-  const intervalSeconds = Number(process.env.B2_SNAPSHOT_INTERVAL_SECONDS ?? process.env.LITESTREAM_SNAPSHOT_INTERVAL_SECONDS ?? 300);
+  const intervalSeconds = Number(process.env.DATABASE_BACKUP_INTERVAL_SECONDS ?? process.env.NEON_SNAPSHOT_INTERVAL_SECONDS ?? process.env.B2_SNAPSHOT_INTERVAL_SECONDS ?? process.env.LITESTREAM_SNAPSHOT_INTERVAL_SECONDS ?? 1800);
   const intervalMs = Math.max(60, intervalSeconds) * 1000;
 
   const snapshot = async () => {
     if (!fs.existsSync(dbPath)) return;
 
+    let plain: Buffer;
+    let currentHash: string;
+    try {
+      plain = fs.readFileSync(dbPath);
+      currentHash = crypto.createHash('sha256').update(plain).digest('hex');
+    } catch (err) {
+      return;
+    }
+
+    if (lastPushedHash && lastPushedHash === currentHash) {
+      console.log('[persistence] SQLite database content unchanged (SHA-256 match), skipping backup upload.');
+      return;
+    }
+
+    let pushedAny = false;
+
     if (hasPostgres) {
       try {
-        const plain = fs.readFileSync(dbPath);
         const zipped = gzipSync(plain);
         const base64Data = zipped.toString('base64');
         await runPostgresDbCommandAsync('push', base64Data);
         lastBackupTime = new Date().toISOString();
         lastBackupError = null;
+        pushedAny = true;
         console.log('[persistence] Uploaded SQLite database backup to PostgreSQL Neon store.');
       } catch (error) {
         lastBackupError = (error as Error).message;
@@ -296,6 +314,7 @@ export function startDatabaseSnapshotLoop(): () => void {
           await uploadDbSnapshot(dbPath);
           lastBackupTime = new Date().toISOString();
           lastBackupError = null;
+          pushedAny = true;
           console.log('[persistence] Uploaded timestamped SQLite backup and latest snapshot to remote object storage.');
         } else {
           lastBackupError = 'Timestamped backup failed or not configured';
@@ -305,6 +324,10 @@ export function startDatabaseSnapshotLoop(): () => void {
         lastBackupError = (error as Error).message;
         console.warn(`[persistence] B2 Snapshot upload failed: ${(error as Error).message}`);
       }
+    }
+
+    if (pushedAny) {
+      lastPushedHash = currentHash;
     }
   };
 

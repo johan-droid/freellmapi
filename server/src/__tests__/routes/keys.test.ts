@@ -141,9 +141,8 @@ describe('Keys API', () => {
     });
     expect(status).toBe(201);
     expect(body.platform).toBe('modelscope');
-    // Catalog rows land only after community testing (#581), so a fresh DB
-    // has no modelscope models and the no-catalog-models notice is expected.
-    expect(body.modelsAvailable).toBe(0);
+    // ModelScope models are now seeded via migration, so 1 model is available.
+    expect(body.modelsAvailable).toBe(1);
   });
 
   it('POST /api/keys rejects invalid platform', async () => {

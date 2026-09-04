@@ -121,6 +121,12 @@ export const EMBEDDING_PLATFORMS = new Set([
   'huggingface',
   'cohere',
   'sealion',
+  'jina',
+  'voyage',
+  'nomic',
+  'deepinfra',
+  'together',
+  'fireworks',
 ]);
 
 interface ProviderCallResult {
