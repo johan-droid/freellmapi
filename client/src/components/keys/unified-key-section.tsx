@@ -23,7 +23,7 @@ export function UnifiedKeySection() {
   })
 
   const apiKey = data?.apiKey ?? ''
-  const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(32) : '…'
+  const masked = apiKey ? apiKey.slice(0, 13) + '•'.repeat(20) : '…'
   const baseUrl = import.meta.env.DEV
     ? `http://${window.location.hostname}:${__SERVER_PORT__}/v1`
     : `${window.location.origin}/v1`
@@ -38,8 +38,8 @@ export function UnifiedKeySection() {
   }
 
   return (
-    <section className="rounded-3xl border bg-card p-5">
-      <div className="flex items-start justify-between gap-4 mb-3">
+    <section className="rounded-2xl sm:rounded-3xl border bg-card p-3.5 sm:p-5">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4 mb-3">
         <div>
           <h2 className="text-sm font-medium">{t('keys.unifiedKey')}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -51,6 +51,7 @@ export function UnifiedKeySection() {
           size="sm"
           onClick={() => regenerate.mutate()}
           disabled={regenerate.isPending || isError}
+          className="self-start text-xs"
         >
           {t('keys.regenerate')}
         </Button>
@@ -61,30 +62,42 @@ export function UnifiedKeySection() {
           {t('keys.serverUnreachableBefore')}<code className="font-mono">{baseUrl.replace('/v1', '')}</code>{t('keys.serverUnreachableAfter')}
         </div>
       ) : (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <code className="flex-1 font-mono text-xs bg-muted px-3 py-2 rounded-lg select-all truncate tabular-nums">
             {showKey ? apiKey : masked}
           </code>
-          <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)}>
-            {showKey ? t('keys.hideKey') : t('keys.showKey')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void copy()}>
-            {copied ? t('keys.copiedKey') : t('keys.copyKey')}
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setShowKey(!showKey)} className="flex-1 sm:flex-initial text-xs">
+              {showKey ? t('keys.hideKey') : t('keys.showKey')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void copy()} className="flex-1 sm:flex-initial text-xs">
+              {copied ? t('keys.copiedKey') : t('keys.copyKey')}
+            </Button>
+          </div>
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-        <span className="text-muted-foreground">{t('keys.baseUrl')}</span>
-        <code className="font-mono">{baseUrl}</code>
-        <span className="text-muted-foreground">{t('keys.endpointChat')}</span>
-        <code className="font-mono">/v1/chat/completions</code>
-        <span className="text-muted-foreground">{t('keys.endpointResponses')}</span>
-        <code className="font-mono">/v1/responses</code>
-        <span className="text-muted-foreground">{t('keys.endpointMessages')}</span>
-        <code className="font-mono">/v1/messages <span className="text-muted-foreground">({t('keys.endpointMessagesHint')})</span></code>
-        <span className="text-muted-foreground">{t('keys.endpointEmbeddings')}</span>
-        <code className="font-mono">/v1/embeddings <span className="text-muted-foreground">({t('keys.endpointEmbeddingsHint')})</span></code>
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground shrink-0">{t('keys.baseUrl')}:</span>
+          <code className="font-mono text-[11px] truncate">{baseUrl}</code>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground shrink-0">{t('keys.endpointChat')}:</span>
+          <code className="font-mono text-[11px] truncate">/v1/chat/completions</code>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground shrink-0">{t('keys.endpointResponses')}:</span>
+          <code className="font-mono text-[11px] truncate">/v1/responses</code>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground shrink-0">{t('keys.endpointMessages')}:</span>
+          <code className="font-mono text-[11px] truncate">/v1/messages <span className="text-muted-foreground">({t('keys.endpointMessagesHint')})</span></code>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground shrink-0">{t('keys.endpointEmbeddings')}:</span>
+          <code className="font-mono text-[11px] truncate">/v1/embeddings <span className="text-muted-foreground">({t('keys.endpointEmbeddingsHint')})</span></code>
+        </div>
       </div>
     </section>
   )

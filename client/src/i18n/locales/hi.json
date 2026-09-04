@@ -284,7 +284,14 @@
     "disableAll": "सभी बंद करें",
     "enableAllHint": "दिखाए गए सभी मॉडल चालू करें, फिर सहेजें",
     "disableAllHint": "दिखाए गए सभी मॉडल बंद करें, फिर सहेजें",
-    "enabledOfShown": "दिखाए गए {shown} में से {enabled} मॉडल चेन में हैं"
+    "enabledOfShown": "दिखाए गए {shown} में से {enabled} मॉडल चेन में हैं",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "बिना मापे गए मॉडल एक्सप्लोर करें",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} समर्थित नहीं है। छवियाँ (PNG, JPEG, WebP, GIF) या टेक्स्ट फ़ाइलें (TXT, MD, CSV, JSON, LOG) संलग्न करें।",
     "attachFailed": "{name} को पढ़ा नहीं जा सका।",
     "noVisionBadge": "छवि नहीं",
-    "visionWarning": "{model} छवियाँ स्वीकार नहीं करता। कोई दृष्टि मॉडल या ऑटो चुनें।"
+    "visionWarning": "{model} छवियाँ स्वीकार नहीं करता। कोई दृष्टि मॉडल या ऑटो चुनें।",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "बातचीत",

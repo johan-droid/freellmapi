@@ -284,7 +284,14 @@
     "disableAll": "تعطيل الكل",
     "enableAllHint": "فعّل كل النماذج المعروضة ثم احفظ",
     "disableAllHint": "عطّل كل النماذج المعروضة ثم احفظ",
-    "enabledOfShown": "{enabled} من {shown} من النماذج المعروضة داخل السلسلة"
+    "enabledOfShown": "{enabled} من {shown} من النماذج المعروضة داخل السلسلة",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "استكشاف النماذج غير المقيسة",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} غير مدعوم. أرفق صورًا (PNG، JPEG، WebP، GIF) أو ملفات نصية (TXT، MD، CSV، JSON، LOG).",
     "attachFailed": "تعذّرت قراءة {name}.",
     "noVisionBadge": "بدون صور",
-    "visionWarning": "{model} لا يقبل الصور. اختر نموذج رؤية أو «تلقائي»."
+    "visionWarning": "{model} لا يقبل الصور. اختر نموذج رؤية أو «تلقائي».",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "المحادثات",

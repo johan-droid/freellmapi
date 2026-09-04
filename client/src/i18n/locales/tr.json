@@ -284,7 +284,14 @@
     "disableAll": "Tümünü kapat",
     "enableAllHint": "Gösterilen tüm modelleri açın, sonra kaydedin",
     "disableAllHint": "Gösterilen tüm modelleri kapatın, sonra kaydedin",
-    "enabledOfShown": "Gösterilen {shown} modelden {enabled} tanesi zincirde"
+    "enabledOfShown": "Gösterilen {shown} modelden {enabled} tanesi zincirde",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "Ölçülmemiş modelleri keşfet",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} desteklenmiyor. Görüntü (PNG, JPEG, WebP, GIF) veya metin dosyaları (TXT, MD, CSV, JSON, LOG) ekleyin.",
     "attachFailed": "{name} okunamadı.",
     "noVisionBadge": "Görüntü yok",
-    "visionWarning": "{model} görüntü kabul etmiyor. Görüntü destekleyen bir model veya Otomatik seçin."
+    "visionWarning": "{model} görüntü kabul etmiyor. Görüntü destekleyen bir model veya Otomatik seçin.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Sohbetler",

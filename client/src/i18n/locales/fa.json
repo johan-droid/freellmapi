@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "کاوش مدل‌های اندازه‌گیری‌نشده",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} پشتیبانی نمی‌شود. تصویر (PNG، JPEG، WebP، GIF) یا فایل متنی (TXT، MD، CSV، JSON، LOG) پیوست کنید.",
     "attachFailed": "{name} خوانده نشد.",
     "noVisionBadge": "بدون تصویر",
-    "visionWarning": "{model} تصویر نمی‌پذیرد. یک مدل با ورودی تصویر یا خودکار را انتخاب کنید."
+    "visionWarning": "{model} تصویر نمی‌پذیرد. یک مدل با ورودی تصویر یا خودکار را انتخاب کنید.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "گفتگوها",

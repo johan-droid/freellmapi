@@ -47,8 +47,6 @@ type TimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | '7d' | '30d' | '90d'
 
 const TIME_RANGES: TimeRange[] = ['5m', '15m', '1h', '6h', '24h', '7d', '30d', '90d']
 
-// The range toggle sticks: whichever window you last looked at is the one the
-// tab opens with next time, instead of always snapping back to 7d (#711).
 const RANGE_KEY = 'analytics.range'
 
 function storedRange(): TimeRange {
@@ -59,16 +57,10 @@ function storedRange(): TimeRange {
   return '7d'
 }
 
-// Sortable columns of the three breakdown tables. Sorting is client-side over
-// the rows already loaded and remembered per table (same localStorage idiom as
-// the range). Recent calls are fetched newest-first with limit=100, so its
-// sort covers that window, not the whole filtered set — the table says so
-// whenever `total` exceeds the loaded rows.
 type RecentCallCol = 'time' | 'ip' | 'agent' | 'model' | 'provider' | 'status' | 'attempts' | 'inTokens' | 'outTokens' | 'latency'
 const RECENT_CALL_COLS: readonly RecentCallCol[] = ['time', 'ip', 'agent', 'model', 'provider', 'status', 'attempts', 'inTokens', 'outTokens', 'latency']
 const RECENT_CALLS_SORT_KEY = 'analytics.recentCallsSort'
 
-// success > canceled > error, so ascending puts the failures on top.
 function statusRank(status: string): number {
   return status === 'success' ? 2 : status === 'canceled' ? 1 : 0
 }
@@ -79,7 +71,6 @@ const recentCallValue: SortValueFn<RecentCallRow, RecentCallCol> = (r, col) => {
     case 'ip': return r.clientIp
     case 'agent': return r.clientUserAgent
     case 'model': return r.modelId
-    // Same text the cell shows: a labelled custom endpoint sorts by its label.
     case 'provider': return r.platform === 'custom' && r.keyLabel ? r.keyLabel : r.platform
     case 'status': return statusRank(r.status)
     case 'attempts': return r.attemptCount
@@ -113,7 +104,6 @@ const BY_KEY_SORT_KEY = 'analytics.byKeySort'
 
 const byKeyValue: SortValueFn<ByKeyRow, ByKeyCol> = (k, col) => {
   switch (col) {
-    // Unlabelled keys sort by id rather than bunching as one empty string.
     case 'label': return k.label || `#${k.keyId}`
     case 'provider': return k.platform
     case 'requests': return k.requests
@@ -124,8 +114,6 @@ const byKeyValue: SortValueFn<ByKeyRow, ByKeyCol> = (k, col) => {
   }
 }
 
-// Response shapes mirror the JSON emitted by server/src/routes/analytics.ts.
-// Latency percentiles and TTFT are null when the raw window is empty (pruned).
 interface SummaryResponse {
   totalRequests: number
   totalTokens?: number
@@ -152,12 +140,7 @@ interface SummaryResponse {
 
 interface ByPlatformRow {
   platform: string
-  // Stable identity for the filter dropdown. For a catalog platform it equals
-  // `platform`; for a custom endpoint it is `custom:<base_url>` (#889), so each
-  // relay is filterable on its own instead of collapsing into 'custom'.
   providerId: string
-  // Human display name. Catalog: the platform id. Custom: the endpoint host
-  // (e.g. 'relay.example.com') so several relays are distinguishable.
   endpoint?: string
   requests: number
   successRate: number
@@ -191,9 +174,6 @@ interface TimelineBucket {
 
 interface ByModelRow {
   platform: string
-  // Endpoint identity of the row (#889). The same model id served by two
-  // custom relays is two rows, one per relay, so the name has to say which.
-  // Same id/name pair /by-platform returns for that endpoint.
   providerId?: string
   endpoint?: string
   modelId: string
@@ -234,8 +214,6 @@ interface QuotaPoolRow {
 
 interface ErrorDistribution {
   byCategory: Array<{ category: string; count: number }>
-  // One entry per provider — per custom ENDPOINT, not one pooled 'custom'
-  // entry (#889); `platform` is kept for the dot coloring.
   byPlatform: Array<{ platform: string; providerId?: string; endpoint?: string; count: number }>
   detailed: Array<{ platform: string; model_id: string; error_category: string; count: number }>
 }
@@ -243,8 +221,6 @@ interface ErrorDistribution {
 interface RecentErrorRow {
   id: number
   platform: string
-  // Which endpoint produced the error: the platform slug for catalog
-  // providers, the custom endpoint's host/path for a relay (#889).
   providerId?: string
   endpoint?: string
   modelId: string
@@ -267,12 +243,7 @@ interface RecentCallRow {
   clientIp: string | null
   clientUserAgent: string | null
   createdAt: string
-  // #785: custom endpoints all share the generic 'custom' platform id; the
-  // user's key label ("Ollama box") names the real provider. Null when the
-  // key was deleted or never labelled.
   keyLabel: string | null
-  // Failover-ladder length: attempts hang off the TERMINAL row of a proxied
-  // request, so mid-ladder failure rows report 0.
   attemptCount: number
 }
 
@@ -281,15 +252,11 @@ interface RecentCallsResponse {
   rows: RecentCallRow[]
 }
 
-// One hop of the failover ladder, from GET /api/analytics/requests/:id.
 interface RequestAttempt {
   ordinal: number
   platform: string
   modelId: string
   keyOrdinal: number
-  // Operator-facing key label captured at attempt time (#869); null when the
-  // key had no label. Shown in a tooltip on the key badge so a multi-key
-  // provider's ladder says WHICH key was tried, not just key1/key2.
   keyLabel: string | null
   outcome: string
   startOffsetMs: number
@@ -304,16 +271,12 @@ interface RequestDetail extends Omit<RecentCallRow, 'attemptCount'> {
 
 type StatusFilter = 'all' | 'success' | 'error' | 'canceled'
 
-// 'canceled' (#752 — the client hung up mid-request) is neither success nor
-// error: neutral amber, not destructive red.
 function statusTextClass(status: string): string {
   if (status === 'success') return 'text-muted-foreground'
   if (status === 'canceled') return 'text-amber-600 dark:text-amber-400'
   return 'text-destructive'
 }
 
-// First product token of the UA ("python-requests/2.32.3", "curl/8.6.0", …)
-// is enough to tell callers apart in a narrow cell; full string on hover.
 function shortUserAgent(ua: string | null): string {
   if (!ua) return '—'
   const first = ua.split(' ')[0]
@@ -364,40 +327,36 @@ function compactLabel(val: string | null | undefined): string {
 
 function Stat({ icon: Icon, label, value, hint, className }: { icon?: LucideIcon; label: string; value: string | number; hint?: string; className?: string }) {
   const card = (
-    <div className="rounded-3xl border bg-card px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] text-muted-foreground uppercase tracking-wider">{label}</p>
+    <div className="rounded-2xl sm:rounded-3xl border bg-card p-2.5 sm:px-4 sm:py-3">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-3">
+        <p className="text-[10px] sm:text-[11px] text-muted-foreground uppercase tracking-wider truncate">{label}</p>
         {Icon && (
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <Icon className="size-3.5" aria-hidden="true" />
+          <span className="flex size-6 sm:size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <Icon className="size-3 sm:size-3.5" aria-hidden="true" />
           </span>
         )}
       </div>
-      <p className={`text-xl font-semibold tabular-nums mt-1 ${className ?? ''}`}>{value}</p>
+      <p className={`text-base sm:text-xl font-semibold tabular-nums mt-0.5 sm:mt-1 truncate ${className ?? ''}`}>{value}</p>
     </div>
   )
-  // Same portal tooltip as the routing strategy chips. Opens BELOW the card:
-  // the stats row sits right under the sticky navbar.
   return hint ? <HoverTooltip text={hint} side="bottom" className="block">{card}</HoverTooltip> : card
 }
 
 function Panel({ icon: Icon, title, actions, children }: { icon?: LucideIcon; title: string; actions?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="rounded-3xl border bg-card">
-      <div className="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-medium">
-          {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden="true" />}
+    <div className="rounded-2xl sm:rounded-3xl border bg-card overflow-hidden">
+      <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-xs sm:text-sm font-medium">
+          {Icon && <Icon className="size-3.5 sm:size-4 text-muted-foreground" aria-hidden="true" />}
           {title}
         </h3>
         {actions}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-2.5 sm:p-4">{children}</div>
     </div>
   )
 }
 
-// Platform swatch shared by the ladder and the per-provider table; same color
-// source as the token-usage legend (lib/routing.ts), same gray fallback.
 function PlatformDot({ platform }: { platform: string }) {
   return (
     <span
@@ -407,28 +366,20 @@ function PlatformDot({ platform }: { platform: string }) {
   )
 }
 
-// Compact ms rendering for ladder timings: sub-second stays in ms, longer
-// spans read as seconds ("38.8 s") like the issue reports do.
 function formatMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`
   return `${ms} ms`
 }
 
-// Key/value line of the request-detail summary grid.
 function DetailField({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] text-muted-foreground uppercase tracking-wider">{label}</p>
-      <p className={`text-sm mt-0.5 break-words ${mono ? 'tabular-nums' : ''}`}>{value}</p>
+      <p className="text-[10px] sm:text-[11px] text-muted-foreground uppercase tracking-wider">{label}</p>
+      <p className={`text-xs sm:text-sm mt-0.5 break-words ${mono ? 'tabular-nums' : ''}`}>{value}</p>
     </div>
   )
 }
 
-// Per-request drill-down: the parent row's fields plus the failover ladder —
-// one entry per dispatched attempt (ordinal → provider/model → key ordinal →
-// outcome → timing, with the redacted per-hop error when one was recorded).
-// A dialog (the app's detail-popup idiom, cf. keys/export-keys-dialog) rather
-// than a routed page so the list's range/filter context stays put behind it.
 function RequestDetailDialog({ requestId, onClose }: { requestId: number | null; onClose: () => void }) {
   const { t } = useI18n()
 
@@ -441,14 +392,14 @@ function RequestDetailDialog({ requestId, onClose }: { requestId: number | null;
   return (
     <Dialog open={requestId != null} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogPopup maxWidth="max-w-2xl">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Activity className="size-4 text-muted-foreground" aria-hidden="true" />
-            <DialogTitle>{t('analytics.requestDetailTitle', { id: requestId ?? '' })}</DialogTitle>
+        <div className="mb-3 sm:mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <DialogTitle className="truncate">{t('analytics.requestDetailTitle', { id: requestId ?? '' })}</DialogTitle>
           </div>
           <DialogClose
             aria-label={t('common.dismiss')}
-            className="-mr-1 rounded-lg p-1 text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="-mr-1 rounded-lg p-1 text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 shrink-0"
           >
             <X className="size-4" />
           </DialogClose>
@@ -460,8 +411,8 @@ function RequestDetailDialog({ requestId, onClose }: { requestId: number | null;
             <Skeleton className="h-32 rounded-xl" />
           </div>
         ) : (
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+          <div className="space-y-4 sm:space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2.5">
               <DetailField
                 label={t('analytics.time')}
                 value={formatSqliteUtcToLocalTime(detail.createdAt, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -499,44 +450,43 @@ function RequestDetailDialog({ requestId, onClose }: { requestId: number | null;
 
             {detail.error && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
-                <p className="text-[11px] text-destructive uppercase tracking-wider">{t('analytics.message')}</p>
-                <p className="text-xs text-destructive/90 mt-1 break-words">{detail.error}</p>
+                <p className="text-[10px] sm:text-[11px] text-destructive uppercase tracking-wider">{t('analytics.message')}</p>
+                <p className="text-xs text-destructive/90 mt-0.5 break-words">{detail.error}</p>
               </div>
             )}
 
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-medium">
-                <GitBranch className="size-4 text-muted-foreground" aria-hidden="true" />
+              <h4 className="flex items-center gap-2 text-xs sm:text-sm font-medium">
+                <GitBranch className="size-3.5 sm:size-4 text-muted-foreground" aria-hidden="true" />
                 {t('analytics.failoverLadder')}
               </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">{t('analytics.failoverLadderHint')}</p>
+              <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">{t('analytics.failoverLadderHint')}</p>
               {detail.attempts.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">{t('analytics.noAttemptTrace')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-4">{t('analytics.noAttemptTrace')}</p>
               ) : (
-                <ol className="mt-3 space-y-2">
+                <ol className="mt-2.5 space-y-1.5">
                   {detail.attempts.map((a) => (
-                    <li key={a.ordinal} className="rounded-xl border px-3 py-2">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="w-6 text-muted-foreground tabular-nums">#{a.ordinal + 1}</span>
+                    <li key={a.ordinal} className="rounded-xl border p-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs">
+                        <span className="w-5 text-muted-foreground tabular-nums">#{a.ordinal + 1}</span>
                         <PlatformDot platform={a.platform} />
                         <span className="font-medium">{a.platform}</span>
-                        <span className="text-muted-foreground truncate" title={a.modelId}>{a.modelId}</span>
+                        <span className="text-muted-foreground truncate max-w-[120px] sm:max-w-none" title={a.modelId}>{a.modelId}</span>
                         <HoverTooltip text={a.keyLabel ? `${t('analytics.keyBadge', { n: a.keyOrdinal })} · ${a.keyLabel}` : t('analytics.keyBadge', { n: a.keyOrdinal })}>
-                          <Badge variant="outline">{t('analytics.keyOrdinal', { n: a.keyOrdinal })}</Badge>
+                          <Badge variant="outline" className="text-[10px]">{t('analytics.keyOrdinal', { n: a.keyOrdinal })}</Badge>
                         </HoverTooltip>
-                        {/* client_abort is the caller's doing, not a hop failure. */}
-                        <Badge variant={a.outcome === 'ok' || a.outcome === 'committed' ? 'secondary' : a.outcome === 'client_abort' ? 'outline' : 'destructive'}>
+                        <Badge variant={a.outcome === 'ok' || a.outcome === 'committed' ? 'secondary' : a.outcome === 'client_abort' ? 'outline' : 'destructive'} className="text-[10px]">
                           {a.outcome}
                         </Badge>
                         <span
-                          className="ml-auto whitespace-nowrap text-muted-foreground tabular-nums"
+                          className="ms-auto whitespace-nowrap text-[11px] text-muted-foreground tabular-nums"
                           title={t('analytics.attemptTimingHint')}
                         >
                           +{formatMs(a.startOffsetMs)} · {formatMs(a.durationMs)}
                         </span>
                       </div>
                       {a.errorSummary && (
-                        <p className="mt-1 pl-8 text-xs text-destructive/90 break-words">{a.errorSummary}</p>
+                        <p className="mt-1 pl-6 text-[11px] text-destructive/90 break-words">{a.errorSummary}</p>
                       )}
                     </li>
                   ))}
@@ -550,15 +500,11 @@ function RequestDetailDialog({ requestId, onClose }: { requestId: number | null;
   )
 }
 
-const axisStyle = { fontSize: 11, fill: 'var(--muted-foreground)' } as const
+const axisStyle = { fontSize: 10, fill: 'var(--muted-foreground)' } as const
 const gridStyle = 'var(--border)'
 const primaryFill = 'var(--foreground)'
-const tooltipStyle = { backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 } as const
+const tooltipStyle = { backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 } as const
 
-// The timeline endpoint buckets on the viewer's wall clock (the query sends
-// the browser's tzOffset), so its zone-less timestamps ("2026-08-10T14:00:00"
-// hourly, "2026-08-10" daily) are already local time. Parse them as local —
-// re-interpreting them as UTC here would shift every tick a second time.
 function formatTimelineTick(value: string): string {
   if (!value) return ''
   const iso = value.includes('T') ? value : `${value}T00:00:00`
@@ -571,12 +517,6 @@ function formatTimelineTick(value: string): string {
   })
 }
 
-// Two categorical series hues, validated against the app's actual chart
-// surfaces (light card #ffffff, dark card #101010) with the dataviz palette
-// checker. Slot A (blue) = the "average / input" series; slot B (aqua) = the
-// "p95 / output" series. The app's own --chart-* tokens are all grayscale
-// (zero chroma), which fails the CVD separation check for a two-series chart,
-// so we take the nearest passing categorical hues and theme them here.
 const seriesA = 'var(--series-a)'
 const seriesB = 'var(--series-b)'
 const chartVars = `
@@ -591,8 +531,6 @@ export default function AnalyticsPage() {
     setRange(r)
     try { localStorage.setItem(RANGE_KEY, r) } catch { /* ignore */ }
   }
-  // Capture "now" once at mount so the savings extrapolation below stays a pure
-  // render (calling Date.now() during render is impure and non-deterministic).
   const [now] = useState(() => Date.now())
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -607,9 +545,6 @@ export default function AnalyticsPage() {
     refetchInterval: 5000,
   })
 
-  // Friendly display name per providerId: catalog → the platform id, custom →
-  // the endpoint host. Used by the filter dropdown so a selected custom relay
-  // shows 'relay.example.com', not 'custom:https://relay.example.com' (#889).
   const providerDisplay = new Map(byPlatform.map((p) => [p.providerId, p.endpoint ?? p.platform]))
 
   const { data: byClient = [] } = useQuery({
@@ -618,8 +553,6 @@ export default function AnalyticsPage() {
     refetchInterval: 5000,
   })
 
-  // Browser's offset from UTC in minutes (480 = UTC+8), so the server buckets
-  // timeline hours/days on the viewer's wall clock instead of UTC.
   const tzOffset = -new Date().getTimezoneOffset()
 
   const { data: timeline = [] } = useQuery({
@@ -664,9 +597,6 @@ export default function AnalyticsPage() {
     refetchInterval: 5000,
   })
 
-  // Recent-calls list filters (status/platform) + the row opened in the
-  // drill-down dialog. Filters ride the query key so react-query refetches
-  // (and caches) each combination on its own.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [platformFilter, setPlatformFilter] = useState<string>('all')
   const [detailId, setDetailId] = useState<number | null>(null)
@@ -676,16 +606,12 @@ export default function AnalyticsPage() {
     queryFn: () => {
       const params = new URLSearchParams({ range, limit: '100' })
       if (statusFilter !== 'all') params.set('status', statusFilter)
-      // provider (not platform) so a selected custom relay filters to itself
-      // instead of every custom endpoint (#889). Catalog ids equal the platform.
       if (platformFilter !== 'all') params.set('provider', platformFilter)
       return apiFetch<RecentCallsResponse>(`/api/analytics/requests?${params}`)
     },
     refetchInterval: 5000,
   })
 
-  // Per-table column sort (client-side, remembered per table). `null` keeps
-  // the API order, so the memoised arrays are the query data itself then.
   const recentCallsSort = useTableSort(RECENT_CALLS_SORT_KEY, RECENT_CALL_COLS)
   const byModelSort = useTableSort(BY_MODEL_SORT_KEY, BY_MODEL_COLS)
   const byKeySort = useTableSort(BY_KEY_SORT_KEY, BY_KEY_COLS)
@@ -695,19 +621,11 @@ export default function AnalyticsPage() {
   )
   const byModelRows = useMemo(() => sortRows(byModel, byModelSort.sort, byModelValue), [byModel, byModelSort.sort])
   const byKeyRows = useMemo(() => sortRows(byKey, byKeySort.sort, byKeyValue), [byKey, byKeySort.sort])
-  // The list is capped at 100 rows while `total` counts the whole filtered
-  // set; say so while a sort is active and there is more than what's loaded.
+
   const recentCallsSortHint = recentCallsSort.sort && recentCalls && recentCalls.total > recentCalls.rows.length
     ? t('analytics.sortHint', { count: recentCalls.rows.length })
     : null
 
-  // Savings card shows ONE stable monthly figure regardless of the selected
-  // range: the last-30-days data projected to a full month from its actual
-  // span (a young install with 2 days of data shows 15x its 2-day total).
-  // Once 30 days of history exist the real total shows as-is. The hover
-  // hint carries the selected period's actual amount and the projection
-  // basis. Querying 30d separately is free: react-query shares the cache
-  // with the 30d tab.
   const { data: summary30 } = useQuery({
     queryKey: ['analytics', 'summary', '30d'],
     queryFn: () => apiFetch<SummaryResponse>(`/api/analytics/summary?range=30d`),
@@ -716,7 +634,6 @@ export default function AnalyticsPage() {
   const baseSavings = summary30?.estimatedCostSavings ?? 0
   const spanDays = (() => {
     if (!summary30?.firstRequestAt) return 30
-    // SQLite stores UTC "YYYY-MM-DD HH:MM:SS"
     const first = new Date(summary30.firstRequestAt.replace(' ', 'T') + 'Z').getTime()
     const days = (now - first) / 86_400_000
     if (!Number.isFinite(days)) return 30
@@ -737,8 +654,6 @@ export default function AnalyticsPage() {
     ? t('analytics.savingsHint', { actual: actualSavings.toFixed(2), range: rangeLabel, span: spanLabel })
     : t('analytics.savingsHintExact', { actual: actualSavings.toFixed(2), range: rangeLabel })
 
-  // Pinned = the client named a specific model instead of auto-routing.
-  // Honored = that model actually served it (the rest failed over).
   const pinned = summary?.pinnedRequests ?? 0
   const pinHonored = summary?.pinHonoredRequests ?? 0
   const chatCount = summary?.requestTypeCounts?.chat ?? 0
@@ -748,46 +663,41 @@ export default function AnalyticsPage() {
     : t('analytics.requestsHintAuto'))
     + ' ' + t('analytics.requestsHintTypes', { chat: chatCount, embedding: embeddingCount })
 
-  // Avg time-to-first-token is null when nothing streamed (or the raw window
-  // was pruned); show a placeholder glyph rather than a misleading "0 ms".
   const avgTtfb = summary?.avgTtfbMs
   const ttftValue = avgTtfb != null ? `${avgTtfb} ms` : '—'
 
-  // p95 latency is likewise null when the raw window was pruned; the server
-  // does NOT coerce it (unlike avg latency), so a null must render the same
-  // placeholder glyph instead of a misleading "0 ms".
   const p95Latency = summary?.p95LatencyMs
   const p95Value = p95Latency != null ? `${p95Latency} ms` : '—'
 
-  // TTFT-by-provider is empty when no provider recorded a streaming first
-  // token; render a muted line instead of an axis-only empty chart.
   const ttftHasData = byPlatform.some((p) => (p.avgTtfbMs ?? 0) > 0)
 
   return (
-    <div className="analytics-viz">
+    <div className="analytics-viz space-y-4 sm:space-y-6">
       <style>{chartVars}</style>
       <PageHeader
         title={t('analytics.title')}
         description={t('analytics.description')}
         actions={
-          <SegmentedControl
-            value={range}
-            onValueChange={updateRange}
-            options={TIME_RANGES.map(r => ({
-              value: r,
-              label: r === '24h' ? t('analytics.range24h')
-                : r === '7d' ? t('analytics.range7d')
-                : r === '30d' ? t('analytics.range30d')
-                : r === '90d' ? t('analytics.range90d')
-                : r,
-            }))}
-            ariaLabel={t('analytics.title')}
-          />
+          <div className="w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <SegmentedControl
+              value={range}
+              onValueChange={updateRange}
+              options={TIME_RANGES.map(r => ({
+                value: r,
+                label: r === '24h' ? t('analytics.range24h')
+                  : r === '7d' ? t('analytics.range7d')
+                  : r === '30d' ? t('analytics.range30d')
+                  : r === '90d' ? t('analytics.range90d')
+                  : r,
+              }))}
+              ariaLabel={t('analytics.title')}
+            />
+          </div>
         }
       />
 
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="space-y-4 sm:space-y-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
           <Stat label="Live routes" value={brokerLive?.requestStats.requests5m ?? 0} />
           <Stat label="Active sessions" value={brokerLive?.activeSessions ?? 0} />
           <Stat label="Live tokens" value={formatTokens(brokerLive?.requestStats.tokens5m)} />
@@ -795,19 +705,19 @@ export default function AnalyticsPage() {
           <Stat label="Live latency" value={`${brokerLive?.requestStats.avgLatencyMs ?? 0} ms`} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="lg:col-span-2">
             <Panel title="Broker route flow">
               {!brokerLive?.routeTimeline?.length ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No live route decisions yet</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No live route decisions yet</p>
               ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={brokerLive.routeTimeline} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={brokerLive.routeTimeline} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                     <XAxis dataKey="minute" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
                     <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="line" />
                     <Line type="monotone" dataKey="routed" name="Routed" stroke={primaryFill} strokeWidth={1.5} dot={false} />
                     <Line type="monotone" dataKey="unrouted" name="Unrouted" stroke="var(--destructive)" strokeWidth={1.5} dot={false} />
                   </LineChart>
@@ -817,22 +727,22 @@ export default function AnalyticsPage() {
           </div>
 
           <Panel title="Lifecycle guard">
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
-                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Provider catalog</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="mb-1.5 text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground">Provider catalog</p>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {(brokerLive?.lifecycle?.length ? brokerLive.lifecycle : [{ status: 'active', count: 0 }]).map(item => (
-                    <Badge key={item.status} variant={item.status === 'active' ? 'secondary' : item.status === 'removed' ? 'destructive' : 'outline'}>
+                    <Badge key={item.status} variant={item.status === 'active' ? 'secondary' : item.status === 'removed' ? 'destructive' : 'outline'} className="text-[10px]">
                       {compactLabel(item.status)} {item.count}
                     </Badge>
                   ))}
                 </div>
               </div>
               <div>
-                <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Probe health</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="mb-1.5 text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground">Probe health</p>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {(brokerLive?.probeHealth?.length ? brokerLive.probeHealth : [{ status: 'no probes', count: 0 }]).map(item => (
-                    <Badge key={item.status} variant={item.status === 'pass' ? 'secondary' : item.status === 'fail' ? 'destructive' : 'outline'}>
+                    <Badge key={item.status} variant={item.status === 'pass' ? 'secondary' : item.status === 'fail' ? 'destructive' : 'outline'} className="text-[10px]">
                       {compactLabel(item.status)} {item.count}
                     </Badge>
                   ))}
@@ -842,17 +752,17 @@ export default function AnalyticsPage() {
           </Panel>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <Panel title="Client profile mix">
             {!brokerLive?.clientMix?.length ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No client signals yet</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No client signals yet</p>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={brokerLive.clientMix} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={brokerLive.clientMix} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey="clientProfile" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
                   <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
                   <Bar dataKey="count" fill={primaryFill} radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -861,14 +771,14 @@ export default function AnalyticsPage() {
 
           <Panel title="Workload mix">
             {!brokerLive?.workloadMix?.length ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No workload signals yet</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No workload signals yet</p>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={brokerLive.workloadMix} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={brokerLive.workloadMix} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey="workload" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} />
                   <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
                   <Bar dataKey="count" fill="var(--muted-foreground)" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -876,39 +786,39 @@ export default function AnalyticsPage() {
           </Panel>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="lg:col-span-2">
             <Panel title="Recent route decisions">
               {!brokerLive?.recentDecisions?.length ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No route decisions yet</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No route decisions yet</p>
               ) : (
-                <div className="max-h-[320px] overflow-y-auto -mx-4">
+                <div className="max-h-[300px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="pl-4">Client</TableHead>
+                        <TableHead>Client</TableHead>
                         <TableHead>Workload</TableHead>
                         <TableHead>Route</TableHead>
                         <TableHead>Reason</TableHead>
-                        <TableHead className="text-right pr-4">Time</TableHead>
+                        <TableHead className="text-right">Time</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {brokerLive.recentDecisions.map((row) => (
                         <TableRow key={`${row.requestId}-${row.createdAt}`}>
-                          <TableCell className="pl-4 text-xs">{compactLabel(row.clientProfile)}</TableCell>
+                          <TableCell className="text-xs">{compactLabel(row.clientProfile)}</TableCell>
                           <TableCell className="text-xs">{compactLabel(row.workload)}</TableCell>
                           <TableCell className="text-xs">
                             {row.providerSlug && row.modelId ? (
-                              <span className="font-mono">{row.providerSlug}/{row.modelId}</span>
+                              <span className="font-mono text-[11px]">{row.providerSlug}/{row.modelId}</span>
                             ) : (
                               <span className="text-destructive">unrouted</span>
                             )}
                           </TableCell>
-                          <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground">
+                          <TableCell className="max-w-[150px] sm:max-w-[220px] truncate text-xs text-muted-foreground">
                             {(row.routeReason.reasons ?? []).join(', ') || row.winnerReason || row.routeReason.note || 'routed'}
                           </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground tabular-nums pr-4">
+                          <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
                             {formatSqliteUtcToLocalTime(row.createdAt, { hour: '2-digit', minute: '2-digit' })}
                           </TableCell>
                         </TableRow>
@@ -922,16 +832,16 @@ export default function AnalyticsPage() {
 
           <Panel title="Recent model changes">
             {!brokerLive?.recentModelChanges?.length ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No model lifecycle events</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No model lifecycle events</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {brokerLive.recentModelChanges.map((row: any, i: number) => (
-                  <div key={`${row.providerSlug}-${row.modelId}-${i}`} className="border-b pb-3 last:border-0 last:pb-0">
+                  <div key={`${row.providerSlug}-${row.modelId}-${i}`} className="border-b pb-2.5 last:border-0 last:pb-0">
                     <div className="flex items-center justify-between gap-2">
-                      <Badge variant={row.changeType.includes('disabled') || row.changeType.includes('removed') ? 'destructive' : 'outline'}>
+                      <Badge variant={row.changeType.includes('disabled') || row.changeType.includes('removed') ? 'destructive' : 'outline'} className="text-[10px]">
                         {compactLabel(row.changeType)}
                       </Badge>
-                      <span className="text-[11px] text-muted-foreground tabular-nums">
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
                         {formatSqliteUtcToLocalTime(row.detectedAt, { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -944,9 +854,9 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Summary stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-2 sm:gap-3">
           {summaryLoading ? (
-            Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-[74px] rounded-3xl" />)
+            Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-[60px] sm:h-[74px] rounded-2xl sm:rounded-3xl" />)
           ) : (
             <>
               <Stat icon={Activity} label={t('analytics.requests')} value={summary?.totalRequests ?? 0} hint={requestsHint} />
@@ -966,19 +876,19 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <div className="lg:col-span-2">
             <Panel icon={ChartLine} title={t('analytics.requestsOverTime')}>
               {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
               ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={timeline} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={timeline} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                     <XAxis dataKey="timestamp" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} tickFormatter={formatTimelineTick} />
                     <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="line" />
                     <Line type="monotone" dataKey="successCount" name={t('common.success')} stroke={primaryFill} strokeWidth={1.5} dot={false} />
                     <Line type="monotone" dataKey="failureCount" name={t('common.failures')} stroke="var(--destructive)" strokeWidth={1.5} dot={false} />
                   </LineChart>
@@ -987,19 +897,18 @@ export default function AnalyticsPage() {
             </Panel>
           </div>
 
-          {/* Tokens over time: input vs output, one axis, two-series legend. */}
           <div className="lg:col-span-2">
             <Panel icon={Coins} title={t('analytics.tokensOverTime')}>
               {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
               ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={timeline} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={timeline} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                     <XAxis dataKey="timestamp" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} tickFormatter={formatTimelineTick} />
                     <YAxis tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={(v: number) => formatTokens(v)} />
                     <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatTokens(Number(value))} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="line" />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="line" />
                     <Line type="monotone" dataKey="inputTokens" name={t('analytics.inputTokens')} stroke={seriesA} strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="outputTokens" name={t('analytics.outputTokens')} stroke={seriesB} strokeWidth={2} dot={false} />
                   </LineChart>
@@ -1010,10 +919,10 @@ export default function AnalyticsPage() {
 
           <Panel icon={Server} title={t('analytics.requestsByProvider')}>
             {byPlatform.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey={(row: ByPlatformRow) => row.endpoint ?? row.platform} tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} {...categoryAxisProps(byPlatform.length)} />
                   <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
@@ -1026,10 +935,10 @@ export default function AnalyticsPage() {
 
           <Panel icon={Bot} title={t('analytics.requestsByAgent')}>
             {byClient.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={byClient} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byClient} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey="clientAgent" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} {...categoryAxisProps(byClient.length)} />
                   <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
@@ -1040,18 +949,17 @@ export default function AnalyticsPage() {
             )}
           </Panel>
 
-          {/* Latency by provider: grouped avg + p95, same unit (ms), one axis. */}
           <Panel icon={Gauge} title={t('analytics.avgLatencyByProvider')}>
             {byPlatform.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey={(row: ByPlatformRow) => row.endpoint ?? row.platform} tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} {...categoryAxisProps(byPlatform.length)} />
                   <YAxis unit="ms" tick={axisStyle} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={tooltipStyle} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} iconType="rect" />
+                  <Legend wrapperStyle={{ fontSize: 11 }} iconType="rect" />
                   <Bar dataKey="avgLatencyMs" name={t('analytics.avgLatency')} fill={seriesA} radius={[3, 3, 0, 0]} maxBarSize={24} />
                   <Bar dataKey="p95LatencyMs" name={t('analytics.p95Latency')} fill={seriesB} radius={[3, 3, 0, 0]} maxBarSize={24} />
                 </BarChart>
@@ -1059,15 +967,14 @@ export default function AnalyticsPage() {
             )}
           </Panel>
 
-          {/* Time to first token by provider (single series → no legend). */}
           <Panel icon={Zap} title={t('analytics.ttftByProvider')}>
             {byPlatform.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
             ) : !ttftHasData ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('analytics.ttftEmpty')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('analytics.ttftEmpty')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byPlatform} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey={(row: ByPlatformRow) => row.endpoint ?? row.platform} tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} {...categoryAxisProps(byPlatform.length)} />
                   <YAxis unit="ms" tick={axisStyle} tickLine={false} axisLine={false} />
@@ -1078,12 +985,11 @@ export default function AnalyticsPage() {
             )}
           </Panel>
 
-          {/* Errors by category: horizontal bars, destructive hue, no legend. */}
           <Panel icon={TriangleAlert} title={t('analytics.errorDistribution')}>
             {!errorDist?.byCategory?.length ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('analytics.noErrors')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('analytics.noErrors')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={errorDist.byCategory} layout="vertical" margin={{ top: 6, right: 12, left: 8, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} horizontal={false} />
                   <XAxis type="number" tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} allowDecimals={false} />
@@ -1097,10 +1003,10 @@ export default function AnalyticsPage() {
 
           <Panel icon={CircleAlert} title={t('analytics.errorsByProvider')}>
             {!errorDist?.byPlatform?.length ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('analytics.noErrors')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('analytics.noErrors')}</p>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={errorDist.byPlatform} margin={{ top: 6, right: 6, left: -12, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={errorDist.byPlatform} margin={{ top: 6, right: 6, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" stroke={gridStyle} />
                   <XAxis dataKey={(row: ErrorDistribution['byPlatform'][number]) => row.endpoint ?? row.platform} tick={axisStyle} tickLine={false} axisLine={{ stroke: gridStyle }} {...categoryAxisProps(errorDist.byPlatform.length)} />
                   <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
@@ -1113,27 +1019,27 @@ export default function AnalyticsPage() {
 
           <Panel icon={CircleAlert} title={t('analytics.recentErrors')}>
             {errors.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">{t('analytics.noErrors')}</p>
+              <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('analytics.noErrors')}</p>
             ) : (
-              <div className="max-h-[240px] overflow-y-auto -mx-4">
+              <div className="max-h-[220px] overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">{t('common.provider')}</TableHead>
+                      <TableHead>{t('common.provider')}</TableHead>
                       <TableHead>{t('analytics.message')}</TableHead>
-                      <TableHead className="text-right pr-4">{t('analytics.time')}</TableHead>
+                      <TableHead className="text-right">{t('analytics.time')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {errors.slice(0, 20).map((e) => (
                       <TableRow key={e.id}>
-                        <TableCell className="pl-4 text-xs">{e.endpoint ?? e.platform}</TableCell>
-                        <TableCell className="text-xs max-w-[200px]">
+                        <TableCell className="text-xs">{e.endpoint ?? e.platform}</TableCell>
+                        <TableCell className="text-xs max-w-[160px] sm:max-w-[200px]">
                           {e.error
                             ? <HoverTooltip text={e.error} side="top" className="block truncate">{e.error}</HoverTooltip>
                             : null}
                         </TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground tabular-nums pr-4">
+                        <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
                           {formatSqliteUtcToLocalTime(e.createdAt, { hour: '2-digit', minute: '2-digit' })}
                         </TableCell>
                       </TableRow>
@@ -1144,17 +1050,12 @@ export default function AnalyticsPage() {
             )}
           </Panel>
 
-          {/* Recent calls: one line per proxied request with the caller's IP +
-              user agent. All local clients share the unified key, so this is
-              the only view that answers "who is hitting the router". Rows open
-              the failover-ladder drill-down; the header hosts status/provider
-              filters (server-side, so total reflects the filtered set). */}
           <div className="lg:col-span-2">
             <Panel
               icon={List}
               title={t('analytics.recentCalls')}
               actions={
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <SegmentedControl
                     value={statusFilter}
                     onValueChange={(v) => setStatusFilter(v as StatusFilter)}
@@ -1191,13 +1092,13 @@ export default function AnalyticsPage() {
                 <p className="pb-2 text-xs text-muted-foreground">{recentCallsSortHint}</p>
               )}
               {!recentCalls?.rows?.length ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
               ) : (
-                <div className="max-h-[420px] overflow-y-auto -mx-4">
+                <div className="max-h-[380px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <SortableHeader column="time" label={t('analytics.time')} className="pl-4" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
+                        <SortableHeader column="time" label={t('analytics.time')} sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                         <SortableHeader column="ip" label={t('analytics.clientIp')} sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                         <SortableHeader column="agent" label={t('analytics.clientAgent')} sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                         <SortableHeader column="model" label={t('common.model')} sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
@@ -1206,7 +1107,7 @@ export default function AnalyticsPage() {
                         <SortableHeader column="attempts" label={t('analytics.attempts')} align="right" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                         <SortableHeader column="inTokens" label={t('analytics.inTokens')} align="right" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                         <SortableHeader column="outTokens" label={t('analytics.outTokens')} align="right" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
-                        <SortableHeader column="latency" label={t('analytics.latency')} align="right" className="pr-4" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
+                        <SortableHeader column="latency" label={t('analytics.latency')} align="right" sort={recentCallsSort.sort} onToggle={recentCallsSort.toggle} />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1216,14 +1117,14 @@ export default function AnalyticsPage() {
                           onClick={() => setDetailId(r.id)}
                           className="cursor-pointer"
                         >
-                          <TableCell className="pl-4 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                          <TableCell className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                             {formatSqliteUtcToLocalTime(r.createdAt, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                           </TableCell>
                           <TableCell className="text-xs font-medium tabular-nums">{r.clientIp ?? '—'}</TableCell>
                           <TableCell className="text-xs text-muted-foreground" title={r.clientUserAgent ?? undefined}>
                             {shortUserAgent(r.clientUserAgent)}
                           </TableCell>
-                          <TableCell className="text-xs max-w-[220px] truncate" title={r.requestedModel && r.requestedModel !== r.modelId ? t('analytics.requestedModelHint', { model: r.requestedModel }) : undefined}>
+                          <TableCell className="text-xs max-w-[160px] sm:max-w-[220px] truncate" title={r.requestedModel && r.requestedModel !== r.modelId ? t('analytics.requestedModelHint', { model: r.requestedModel }) : undefined}>
                             {r.modelId}
                             {r.requestedModel && r.requestedModel !== r.modelId ? ' *' : ''}
                           </TableCell>
@@ -1233,14 +1134,12 @@ export default function AnalyticsPage() {
                           <TableCell className={`text-xs ${statusTextClass(r.status)}`} title={r.error ?? undefined}>
                             {r.status}
                           </TableCell>
-                          {/* >1 = the request burned failover hops; that is the
-                              row worth drilling into, so give it weight. */}
                           <TableCell className={`text-right text-xs tabular-nums ${r.attemptCount > 1 ? 'font-medium' : 'text-muted-foreground'}`}>
                             {r.attemptCount > 0 ? r.attemptCount : '—'}
                           </TableCell>
                           <TableCell className="text-right text-xs tabular-nums">{formatTokens(r.inputTokens)}</TableCell>
                           <TableCell className="text-right text-xs tabular-nums">{formatTokens(r.outputTokens)}</TableCell>
-                          <TableCell className="text-right text-xs tabular-nums pr-4">{r.latencyMs} ms</TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">{r.latencyMs} ms</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1250,19 +1149,16 @@ export default function AnalyticsPage() {
             </Panel>
           </div>
 
-          {/* Per-provider breakdown: the tabular face of the by-platform data —
-              the charts above show volume/latency, this row surfaces the
-              success-rate and error-count numbers (#335). */}
           <div className="lg:col-span-2">
             <Panel icon={Network} title={t('analytics.providerBreakdown')}>
               {byPlatform.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
               ) : (
-                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                <div className="max-h-[360px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="pl-4">{t('common.provider')}</TableHead>
+                        <TableHead>{t('common.provider')}</TableHead>
                         <TableHead className="text-right">{t('analytics.requests')}</TableHead>
                         <TableHead className="text-right">{t('common.success')}</TableHead>
                         <TableHead className="text-right">{t('analytics.errors')}</TableHead>
@@ -1271,29 +1167,29 @@ export default function AnalyticsPage() {
                         <TableHead className="text-right">{t('analytics.avgTtft')}</TableHead>
                         <TableHead className="text-right">{t('analytics.tokensPerSec')}</TableHead>
                         <TableHead className="text-right">{t('analytics.inTokens')}</TableHead>
-                        <TableHead className="text-right pr-4">{t('analytics.outTokens')}</TableHead>
+                        <TableHead className="text-right">{t('analytics.outTokens')}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {byPlatform.map((p) => (
                         <TableRow key={p.providerId}>
-                          <TableCell className="pl-4 text-sm font-medium">
-                            <span className="flex items-center gap-2">
+                          <TableCell className="text-xs sm:text-sm font-medium">
+                            <span className="flex items-center gap-1.5 sm:gap-2">
                               <PlatformDot platform={p.platform} />
                               {p.endpoint ?? p.platform}
                             </span>
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{p.requests}</TableCell>
-                          <TableCell className="text-right tabular-nums">{p.successRate}%</TableCell>
-                          <TableCell className={`text-right tabular-nums ${p.errorCount > 0 ? 'text-destructive' : ''}`}>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.successRate}%</TableCell>
+                          <TableCell className={`text-right tabular-nums text-xs sm:text-sm ${p.errorCount > 0 ? 'text-destructive' : ''}`}>
                             {p.errorCount > 0 ? p.errorCount : '—'}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{p.avgLatencyMs} ms</TableCell>
-                          <TableCell className="text-right tabular-nums">{p.p95LatencyMs != null ? `${p.p95LatencyMs} ms` : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{p.avgTtfbMs != null ? `${p.avgTtfbMs} ms` : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{p.avgTokensPerSecond != null ? p.avgTokensPerSecond : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(p.totalInputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums pr-4">{formatTokens(p.totalOutputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.avgLatencyMs} ms</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.p95LatencyMs != null ? `${p.p95LatencyMs} ms` : '—'}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.avgTtfbMs != null ? `${p.avgTtfbMs} ms` : '—'}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{p.avgTokensPerSecond != null ? p.avgTokensPerSecond : '—'}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(p.totalInputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(p.totalOutputTokens)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1306,13 +1202,13 @@ export default function AnalyticsPage() {
           <div className="lg:col-span-2">
             <Panel icon={Layers} title={t('analytics.perModelBreakdown')}>
               {byModel.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('common.noData')}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">{t('common.noData')}</p>
               ) : (
-                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                <div className="max-h-[360px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <SortableHeader column="model" label={t('common.model')} className="pl-4" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
+                        <SortableHeader column="model" label={t('common.model')} sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                         <SortableHeader column="provider" label={t('common.provider')} sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                         <SortableHeader column="requests" label={t('analytics.requests')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                         <SortableHeader column="pinned" label={t('analytics.pinned')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
@@ -1320,21 +1216,21 @@ export default function AnalyticsPage() {
                         <SortableHeader column="latency" label={t('analytics.latency')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                         <SortableHeader column="inTokens" label={t('analytics.inTokens')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                         <SortableHeader column="outTokens" label={t('analytics.outTokens')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
-                        <SortableHeader column="saved" label={t('analytics.saved')} align="right" className="pr-4" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
+                        <SortableHeader column="saved" label={t('analytics.saved')} align="right" sort={byModelSort.sort} onToggle={byModelSort.toggle} />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {byModelRows.map((m) => (
                         <TableRow key={`${m.providerId ?? m.platform}:${m.modelId}`}>
-                          <TableCell className="pl-4 text-sm font-medium">{m.displayName}</TableCell>
+                          <TableCell className="text-xs sm:text-sm font-medium">{m.displayName}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">{m.endpoint ?? m.platform}</TableCell>
-                          <TableCell className="text-right tabular-nums">{m.requests}</TableCell>
-                          <TableCell className="text-right tabular-nums">{m.pinnedRequests > 0 ? m.pinnedRequests : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{m.successRate}%</TableCell>
-                          <TableCell className="text-right tabular-nums">{m.avgLatencyMs} ms</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(m.totalInputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(m.totalOutputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums pr-4">${(m.estimatedCost ?? 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{m.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{m.pinnedRequests > 0 ? m.pinnedRequests : '—'}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{m.successRate}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{m.avgLatencyMs} ms</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(m.totalInputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(m.totalOutputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">${(m.estimatedCost ?? 0).toFixed(2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1347,26 +1243,26 @@ export default function AnalyticsPage() {
           <div className="lg:col-span-2">
             <Panel icon={Network} title="Quota Pools Analytics">
               {quotaPools.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No active quota pools</p>
+                <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">No active quota pools</p>
               ) : (
-                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                <div className="max-h-[360px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="pl-4">Provider / Account</TableHead>
+                        <TableHead>Provider / Account</TableHead>
                         <TableHead>Quota Pool Key</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Requests</TableHead>
                         <TableHead className="text-right">In Tokens</TableHead>
                         <TableHead className="text-right">Out Tokens</TableHead>
                         <TableHead className="text-right">Total Tokens</TableHead>
-                        <TableHead className="text-right pr-4">Failed Requests</TableHead>
+                        <TableHead className="text-right">Failed Requests</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {quotaPools.map((q) => (
                         <TableRow key={q.quotaPoolKey}>
-                          <TableCell className="pl-4 text-sm font-medium">
+                          <TableCell className="text-xs sm:text-sm font-medium">
                             <span className="flex items-center gap-2">
                               <PlatformDot platform={q.providerSlug} />
                               {q.accountName}
@@ -1374,13 +1270,13 @@ export default function AnalyticsPage() {
                           </TableCell>
                           <TableCell className="text-xs font-mono text-muted-foreground">{q.quotaPoolKey}</TableCell>
                           <TableCell className="text-xs">
-                            <Badge variant={q.status === 'active' ? 'secondary' : 'outline'}>{q.status}</Badge>
+                            <Badge variant={q.status === 'active' ? 'secondary' : 'outline'} className="text-[10px]">{q.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{q.requests}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(q.inputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(q.outputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums font-medium">{formatTokens(q.totalTokens)}</TableCell>
-                          <TableCell className={`text-right tabular-nums pr-4 ${q.failedRequests > 0 ? 'text-destructive' : ''}`}>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{q.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(q.inputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(q.outputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm font-medium">{formatTokens(q.totalTokens)}</TableCell>
+                          <TableCell className={`text-right tabular-nums text-xs sm:text-sm ${q.failedRequests > 0 ? 'text-destructive' : ''}`}>
                             {q.failedRequests > 0 ? q.failedRequests : '—'}
                           </TableCell>
                         </TableRow>
@@ -1392,35 +1288,34 @@ export default function AnalyticsPage() {
             </Panel>
           </div>
 
-          {/* Usage by key: only rendered when the endpoint returns rows. */}
           {byKey.length > 0 && (
             <div className="lg:col-span-2">
               <Panel icon={KeyRound} title={t('analytics.usageByKey')}>
-                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                <div className="max-h-[360px] overflow-y-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <SortableHeader column="label" label={t('analytics.keyColumn')} className="pl-4" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
+                        <SortableHeader column="label" label={t('analytics.keyColumn')} sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                         <SortableHeader column="provider" label={t('common.provider')} sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                         <SortableHeader column="requests" label={t('analytics.requests')} align="right" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                         <SortableHeader column="success" label={t('common.success')} align="right" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                         <SortableHeader column="latency" label={t('analytics.latency')} align="right" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                         <SortableHeader column="inTokens" label={t('analytics.inTokens')} align="right" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
-                        <SortableHeader column="outTokens" label={t('analytics.outTokens')} align="right" className="pr-4" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
+                        <SortableHeader column="outTokens" label={t('analytics.outTokens')} align="right" sort={byKeySort.sort} onToggle={byKeySort.toggle} />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {byKeyRows.map((k) => (
                         <TableRow key={k.keyId}>
-                          <TableCell className="pl-4 text-sm font-medium">
+                          <TableCell className="text-xs sm:text-sm font-medium">
                             {k.label || t('analytics.keyLabelFallback', { id: k.keyId })}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{k.platform ?? '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{k.requests}</TableCell>
-                          <TableCell className="text-right tabular-nums">{k.successRate}%</TableCell>
-                          <TableCell className="text-right tabular-nums">{k.avgLatencyMs} ms</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatTokens(k.totalInputTokens)}</TableCell>
-                          <TableCell className="text-right tabular-nums pr-4">{formatTokens(k.totalOutputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{k.requests}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{k.successRate}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{k.avgLatencyMs} ms</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(k.totalInputTokens)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-xs sm:text-sm">{formatTokens(k.totalOutputTokens)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

@@ -284,7 +284,14 @@
     "disableAll": "全部停用",
     "enableAllHint": "启用所有显示的模型，然后保存",
     "disableAllHint": "停用所有显示的模型，然后保存",
-    "enabledOfShown": "显示的 {shown} 个模型中有 {enabled} 个在链中"
+    "enabledOfShown": "显示的 {shown} 个模型中有 {enabled} 个在链中",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "探索未测模型",
@@ -783,7 +790,10 @@
     "attachUnsupported": "不支持 {name}。请附加图像（PNG、JPEG、WebP、GIF）或文本文件（TXT、MD、CSV、JSON、LOG）。",
     "attachFailed": "无法读取 {name}。",
     "noVisionBadge": "不支持图像",
-    "visionWarning": "{model} 不接受图像。请选择视觉模型或「自动」。"
+    "visionWarning": "{model} 不接受图像。请选择视觉模型或「自动」。",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "对话",

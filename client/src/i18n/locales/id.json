@@ -284,7 +284,14 @@
     "disableAll": "Nonaktifkan semua",
     "enableAllHint": "Aktifkan semua model yang tampil, lalu simpan",
     "disableAllHint": "Nonaktifkan semua model yang tampil, lalu simpan",
-    "enabledOfShown": "{enabled} dari {shown} model yang tampil ada di rantai"
+    "enabledOfShown": "{enabled} dari {shown} model yang tampil ada di rantai",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "Jelajahi model yang belum terukur",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} tidak didukung. Lampirkan gambar (PNG, JPEG, WebP, GIF) atau file teks (TXT, MD, CSV, JSON, LOG).",
     "attachFailed": "Tidak dapat membaca {name}.",
     "noVisionBadge": "Tanpa gambar",
-    "visionWarning": "{model} tidak menerima gambar. Pilih model visi atau Otomatis."
+    "visionWarning": "{model} tidak menerima gambar. Pilih model visi atau Otomatis.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Percakapan",

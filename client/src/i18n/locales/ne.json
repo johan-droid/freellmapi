@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "नमापिएका मोडेलहरू अन्वेषण गर्नुहोस्",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} समर्थित छैन। छवि (PNG, JPEG, WebP, GIF) वा पाठ फाइलहरू (TXT, MD, CSV, JSON, LOG) संलग्न गर्नुहोस्।",
     "attachFailed": "{name} पढ्न सकिएन।",
     "noVisionBadge": "छवि छैन",
-    "visionWarning": "{model} ले छवि स्वीकार गर्दैन। छवि स्वीकार गर्ने मोडेल वा स्वत: छान्नुहोस्।"
+    "visionWarning": "{model} ले छवि स्वीकार गर्दैन। छवि स्वीकार गर्ने मोडेल वा स्वत: छान्नुहोस्।",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "कुराकानीहरू",

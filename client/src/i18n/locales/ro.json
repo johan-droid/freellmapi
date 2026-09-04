@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "Explorează modelele nemăsurate",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} nu este acceptat. Atașează imagini (PNG, JPEG, WebP, GIF) sau fișiere text (TXT, MD, CSV, JSON, LOG).",
     "attachFailed": "Nu s-a putut citi {name}.",
     "noVisionBadge": "Fără imagini",
-    "visionWarning": "{model} nu acceptă imagini. Alege un model cu suport pentru imagini sau Auto."
+    "visionWarning": "{model} nu acceptă imagini. Alege un model cu suport pentru imagini sau Auto.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Conversații",

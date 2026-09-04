@@ -284,7 +284,14 @@
     "disableAll": "Desativar todos",
     "enableAllHint": "Ative todos os modelos exibidos e salve",
     "disableAllHint": "Desative todos os modelos exibidos e salve",
-    "enabledOfShown": "{enabled} de {shown} modelos exibidos estão na cadeia"
+    "enabledOfShown": "{enabled} de {shown} modelos exibidos estão na cadeia",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "Explorar modelos sem medições",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} não é compatível. Anexe imagens (PNG, JPEG, WebP, GIF) ou arquivos de texto (TXT, MD, CSV, JSON, LOG).",
     "attachFailed": "Não foi possível ler {name}.",
     "noVisionBadge": "Sem imagens",
-    "visionWarning": "{model} não aceita imagens. Escolha um modelo de visão ou Auto."
+    "visionWarning": "{model} não aceita imagens. Escolha um modelo de visão ou Auto.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Conversas",

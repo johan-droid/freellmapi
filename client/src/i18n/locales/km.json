@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "ស្វែងរកម៉ូដែលដែលមិនទាន់វាស់វែង",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} មិនត្រូវបានគាំទ្រទេ។ ភ្ជាប់រូបភាព (PNG, JPEG, WebP, GIF) ឬឯកសារអត្ថបទ (TXT, MD, CSV, JSON, LOG)។",
     "attachFailed": "មិនអាចអានឯកសារ {name} បានទេ។",
     "noVisionBadge": "គ្មានរូបភាព",
-    "visionWarning": "{model} មិនទទួលយករូបភាពទេ។ សូមជ្រើសរើសម៉ូដែលដែលទទួលរូបភាព ឬ Auto។"
+    "visionWarning": "{model} មិនទទួលយករូបភាពទេ។ សូមជ្រើសរើសម៉ូដែលដែលទទួលរូបភាព ឬ Auto។",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "ការសន្ទនា",

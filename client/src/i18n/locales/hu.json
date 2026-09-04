@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "Nem mért modellek felfedezése",
@@ -783,7 +790,10 @@
     "attachUnsupported": "A(z) {name} nem támogatott. Csatolj képeket (PNG, JPEG, WebP, GIF) vagy szövegfájlokat (TXT, MD, CSV, JSON, LOG).",
     "attachFailed": "A(z) {name} nem olvasható.",
     "noVisionBadge": "Nincs kép",
-    "visionWarning": "A(z) {model} nem fogad képeket. Válassz képfeldolgozó modellt vagy az Automatikus lehetőséget."
+    "visionWarning": "A(z) {model} nem fogad képeket. Válassz képfeldolgozó modellt vagy az Automatikus lehetőséget.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Beszélgetések",

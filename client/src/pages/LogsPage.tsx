@@ -35,19 +35,9 @@ import {
   type LogsResponse,
 } from '@/lib/logs'
 
-// Typing in the search box must not fire a request per keystroke; the server
-// re-runs the whole query from scratch for every filter change.
 const SEARCH_DEBOUNCE_MS = 300
-
-// How close to the bottom still counts as "watching the tail", in pixels. Same
-// slack (and the same direction-aware detach below) as the Playground
-// transcript: an exact comparison never matches on sub-pixel scroll positions,
-// and a couple of lines' worth keeps a stray trackpad nudge from detaching.
 const SCROLL_FOLLOW_SLACK = 40
 
-// Level colors follow the dashboard's existing severity ramp (see the penalty
-// inspector): red for error, amber for warn, a calm blue for info, and plain
-// muted for debug — which is noise you opted into.
 const LEVEL_CLASS: Record<LogLevel, string> = {
   debug: 'bg-muted text-muted-foreground',
   info: 'bg-sky-600/15 text-sky-700 dark:text-sky-400',
@@ -80,16 +70,16 @@ function LogRow({
   return (
     <div
       data-log-level={entry.level}
-      className="flex items-start gap-2 rounded-lg px-2 py-1 font-mono text-[11px] leading-relaxed hover:bg-muted/40"
+      className="flex flex-wrap sm:flex-nowrap items-start gap-1.5 sm:gap-2 rounded-lg px-2 py-1 font-mono text-[11px] leading-relaxed hover:bg-muted/40"
     >
-      <span className="shrink-0 tabular-nums text-muted-foreground">{formatLogTime(entry.ts)}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground text-[10px] sm:text-[11px]">{formatLogTime(entry.ts)}</span>
       <Badge
         variant="secondary"
-        className={cn('h-4 shrink-0 rounded px-1 font-mono text-[10px] uppercase', LEVEL_CLASS[entry.level])}
+        className={cn('h-4 shrink-0 rounded px-1 font-mono text-[9px] sm:text-[10px] uppercase', LEVEL_CLASS[entry.level])}
       >
         {entry.level}
       </Badge>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-full sm:basis-auto">
         {(entry.source || entry.provider || entry.model || entry.event || entry.requestId) && (
           <span className="me-1.5 inline-flex flex-wrap items-center gap-1 align-top">
             {entry.source && <Chip>{entry.source}</Chip>}
@@ -99,7 +89,7 @@ function LogRow({
             {entry.requestId && <Chip>#{entry.requestId}</Chip>}
           </span>
         )}
-        <span className="whitespace-pre-wrap wrap-break-word">
+        <span className="whitespace-pre-wrap break-all sm:break-normal">
           {long && !expanded ? clampMessage(entry.message) : entry.message}
         </span>
         {long && (
@@ -126,33 +116,22 @@ export default function LogsPage() {
   const [search, setSearch] = useState('')
   const [paused, setPaused] = useState(false)
 
-  // The tail itself lives in component state, not in the query cache: each poll
-  // returns only what is NEWER than the cursor, so the buffer is the sum of
-  // every response since the last filter change (capped, oldest evicted).
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [counts, setCounts] = useState<LogCounts>(EMPTY_LOG_COUNTS)
   const [providers, setProviders] = useState<string[]>([])
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set())
-  // Live-tail state for RENDER: whether the reader is parked at the bottom, and
-  // (when they are not) the newest id they had already seen when they detached.
-  // Anything newer than that is what the "Jump to latest" pill is offering.
   const [follow, setFollow] = useState<{ following: boolean; seenId: number | null }>({
     following: true,
     seenId: null,
   })
 
   const cursorRef = useRef<number | null>(null)
-  // Bumped on every filter change. A response tagged with an older stream is
-  // dropped rather than pollute the tail the user is now watching.
   const streamRef = useRef(0)
   const listRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const followRef = useRef(true)
   const lastScrollTopRef = useRef(0)
 
-  // Every filter is applied server-side, so changing one invalidates both the
-  // buffer and the cursor: the next fetch is a fresh newest-N page. Each filter
-  // control calls this as part of its own change handler.
   const resetStream = useCallback(() => {
     streamRef.current += 1
     cursorRef.current = null
@@ -163,8 +142,6 @@ export default function LogsPage() {
     setFollow({ following: true, seenId: null })
   }, [])
 
-  // Typing must not fire a request per keystroke: the committed `search` (and
-  // with it the query key) only moves once the box has been quiet for a beat.
   useEffect(() => {
     const trimmed = searchInput.trim()
     if (trimmed === search) return
@@ -179,19 +156,12 @@ export default function LogsPage() {
 
   const query = useQuery({
     queryKey: ['logs', filterKey],
-    // Nothing selected means nothing to ask for; the page says so instead.
     enabled: levels.length > 0,
-    // First call has no cursor (newest 200); every later call is incremental.
-    // The merge happens here rather than in an effect on `data` because
-    // react-query's structural sharing can hand back an identical object for
-    // an unchanged response — and an empty poll still has to advance the cursor.
     queryFn: async () => {
       const stream = streamRef.current
       const response = await apiFetch<LogsResponse>(
         buildLogsQuery({ levels, q: search, provider, sinceId: cursorRef.current, limit: LOG_PAGE_LIMIT }),
       )
-      // Filters changed while this was in flight: its rows belong to a query
-      // the user has already left, and its cursor to a different stream.
       if (streamRef.current !== stream) return response
       const incoming = response.entries ?? []
       cursorRef.current = advanceCursor(cursorRef.current, { entries: incoming, nextId: response.nextId })
@@ -201,10 +171,7 @@ export default function LogsPage() {
       return response
     },
     refetchInterval: paused ? false : LOG_POLL_MS,
-    // A backgrounded tab burns no requests; polling resumes on focus.
     refetchIntervalInBackground: false,
-    // Pause has to mean paused — otherwise coming back to the tab would sneak
-    // a fetch past it.
     refetchOnWindowFocus: !paused,
     refetchOnReconnect: !paused,
   })
@@ -216,17 +183,12 @@ export default function LogsPage() {
       setCounts(EMPTY_LOG_COUNTS)
       setProviders([])
       toast.success(t('logs.cleared'))
-      // The cursor is back to null, so the invalidated query refetches from scratch.
       void queryClient.invalidateQueries({ queryKey: ['logs'] })
     },
   })
 
   const newestId = entries.length ? entries[entries.length - 1].id : null
 
-  // Follow the tail only while the reader is parked at the bottom. Judging by
-  // direction (not position alone) keeps our own smooth scroll — which always
-  // travels downwards — from being mistaken for the user taking over, whatever
-  // they scrolled with: wheel, keys, or the bar.
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget
     const top = el.scrollTop
@@ -241,8 +203,6 @@ export default function LogsPage() {
     }
   }
 
-  // mergeEntries returns the SAME array when a poll brought nothing, so this
-  // only runs on real output — an idle server never yanks the viewport.
   useEffect(() => {
     if (!entries.length) return
     if (followRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -263,10 +223,7 @@ export default function LogsPage() {
     })
   }
 
-  // Only the FIRST page shows skeletons; a poll that comes back empty must not
-  // flash them over a quiet-but-working tail every three seconds.
   const loading = query.isPending && !query.isError
-  // Offer the jump only when there is something below the fold to jump TO.
   const showJump = !follow.following && newestId != null && (follow.seenId == null || newestId > follow.seenId)
 
   return (
@@ -299,7 +256,7 @@ export default function LogsPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t('logs.levelFilter')}>
           {LOG_LEVELS.map(level => {
             const active = levels.includes(level)
@@ -314,7 +271,7 @@ export default function LogsPage() {
                   resetStream()
                 }}
                 className={cn(
-                  'inline-flex h-7 items-center gap-1.5 rounded-4xl border border-transparent px-2.5 text-xs font-medium transition-colors',
+                  'inline-flex h-6 sm:h-7 items-center gap-1 sm:gap-1.5 rounded-full border border-transparent px-2 sm:px-2.5 text-[11px] sm:text-xs font-medium transition-colors',
                   active ? LEVEL_CLASS[level] : 'bg-muted/40 text-muted-foreground hover:text-foreground',
                 )}
               >
@@ -325,49 +282,51 @@ export default function LogsPage() {
           })}
         </div>
 
-        <Select
-          value={provider}
-          onValueChange={(value) => {
-            setProvider(value ?? 'all')
-            resetStream()
-          }}
-        >
-          <SelectTrigger size="sm" aria-label={t('common.provider')}>
-            <SelectValue>
-              {(value: string) => (!value || value === 'all' ? t('analytics.allProviders') : value)}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('analytics.allProviders')}</SelectItem>
-            {providers.map(name => (
-              <SelectItem key={name} value={name}>{name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Select
+            value={provider}
+            onValueChange={(value) => {
+              setProvider(value ?? 'all')
+              resetStream()
+            }}
+          >
+            <SelectTrigger size="sm" aria-label={t('common.provider')} className="w-1/2 sm:w-auto">
+              <SelectValue>
+                {(value: string) => (!value || value === 'all' ? t('analytics.allProviders') : value)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('analytics.allProviders')}</SelectItem>
+              {providers.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        <Input
-          value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-          placeholder={t('logs.searchPlaceholder')}
-          aria-label={t('logs.searchPlaceholder')}
-          className="h-7 w-full sm:w-64"
-        />
+          <Input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder={t('logs.searchPlaceholder')}
+            aria-label={t('logs.searchPlaceholder')}
+            className="h-8 text-xs w-1/2 sm:w-64"
+          />
+        </div>
       </div>
 
       <p className="mb-2 text-xs text-muted-foreground">{t('logs.countsHint')}</p>
 
       {query.isError && (
-        <div className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
+        <div className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {t('logs.loadFailed')}{' '}
           {query.error instanceof Error ? query.error.message : String(query.error ?? '')}
         </div>
       )}
 
-      <div className="relative rounded-3xl border bg-card">
+      <div className="relative rounded-2xl sm:rounded-3xl border bg-card">
         <div
           ref={listRef}
           onScroll={handleScroll}
-          className="max-h-[65vh] min-h-[240px] overflow-y-auto p-3"
+          className="max-h-[65vh] min-h-[200px] overflow-y-auto p-2 sm:p-3"
         >
           {levels.length === 0 ? (
             <EmptyState
@@ -383,8 +342,6 @@ export default function LogsPage() {
               ))}
             </div>
           ) : entries.length === 0 ? (
-            // On a failed load the banner above already says what happened;
-            // pairing it with "nothing here yet" would just muddy the message.
             query.isError ? null : (
               <EmptyState
                 className="border-0"
@@ -414,7 +371,7 @@ export default function LogsPage() {
             size="sm"
             variant="secondary"
             onClick={jumpToLatest}
-            className="absolute inset-x-0 bottom-3 mx-auto w-fit shadow-sm"
+            className="absolute inset-x-0 bottom-3 mx-auto w-fit shadow-sm text-xs"
           >
             <ArrowDownToLine />
             {t('logs.jumpToLatest')}

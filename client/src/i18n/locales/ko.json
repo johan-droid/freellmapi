@@ -284,7 +284,14 @@
     "disableAll": "전체 해제",
     "enableAllHint": "표시된 모델을 모두 켠 뒤 저장하세요",
     "disableAllHint": "표시된 모델을 모두 끈 뒤 저장하세요",
-    "enabledOfShown": "표시된 {shown}개 중 {enabled}개가 체인에 있습니다"
+    "enabledOfShown": "표시된 {shown}개 중 {enabled}개가 체인에 있습니다",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "미측정 모델 탐색",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name}은(는) 지원되지 않습니다. 이미지(PNG, JPEG, WebP, GIF) 또는 텍스트 파일(TXT, MD, CSV, JSON, LOG)을 첨부하세요.",
     "attachFailed": "{name}을(를) 읽을 수 없습니다.",
     "noVisionBadge": "이미지 불가",
-    "visionWarning": "{model}은(는) 이미지를 지원하지 않습니다. 이미지 입력이 가능한 모델 또는 자동을 선택하세요."
+    "visionWarning": "{model}은(는) 이미지를 지원하지 않습니다. 이미지 입력이 가능한 모델 또는 자동을 선택하세요.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "대화",

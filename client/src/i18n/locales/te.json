@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "కొలవని మోడల్స్‌ను అన్వేషించండి",
@@ -783,7 +790,10 @@
     "attachUnsupported": "{name} మద్దతు లేదు. చిత్రాలను (PNG, JPEG, WebP, GIF) లేదా టెక్స్ట్ ఫైల్‌లను (TXT, MD, CSV, JSON, LOG) జోడించండి.",
     "attachFailed": "{name} చదవడం సాధ్యం కాలేదు.",
     "noVisionBadge": "చిత్రాలు లేవు",
-    "visionWarning": "{model} చిత్రాలను అంగీకరించదు. చిత్రాలకు మద్దతిచ్చే మోడల్‌ని లేదా ఆటో ఎంచుకోండి."
+    "visionWarning": "{model} చిత్రాలను అంగీకరించదు. చిత్రాలకు మద్దతిచ్చే మోడల్‌ని లేదా ఆటో ఎంచుకోండి.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "సంభాషణలు",

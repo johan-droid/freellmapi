@@ -284,7 +284,14 @@
     "disableAll": "Disable all",
     "enableAllHint": "Turn on every model shown, then Save",
     "disableAllHint": "Turn off every model shown, then Save",
-    "enabledOfShown": "{enabled} of {shown} shown models are in the chain"
+    "enabledOfShown": "{enabled} of {shown} shown models are in the chain",
+    "poolsTab": "Quota Pools & Routing",
+    "coding": "Coding",
+    "codingTitle": "Prefer this model for coding, debugging, and agentic workspace work",
+    "research": "Research",
+    "researchTitle": "Prefer this model for analysis, deeper reasoning, and long-form tasks",
+    "chat": "Chat",
+    "chatTitle": "Prefer this model for quick conversation and general chat"
   },
   "strategies": {
     "explore": "I-explore ang mga hindi pa nasusukat na modelo",
@@ -783,7 +790,10 @@
     "attachUnsupported": "Hindi suportado ang {name}. Maglakip ng mga larawan (PNG, JPEG, WebP, GIF) o mga text file (TXT, MD, CSV, JSON, LOG).",
     "attachFailed": "Hindi mabasa ang {name}.",
     "noVisionBadge": "Walang larawan",
-    "visionWarning": "Hindi tumatanggap ng larawan ang {model}. Pumili ng modelong tumatanggap ng larawan o Auto."
+    "visionWarning": "Hindi tumatanggap ng larawan ang {model}. Pumili ng modelong tumatanggap ng larawan o Auto.",
+    "autoModelCoding": "Auto: Coding (development & agents)",
+    "autoModelThinking": "Auto: Thinking (reasoning & research)",
+    "autoModelAgentic": "Auto: Agentic (tools & workflows)"
   },
   "playgroundSessions": {
     "heading": "Mga usapan",

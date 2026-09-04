@@ -34,8 +34,6 @@ export default function KeysPage() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<KeysTab>('providers')
   const [addOpen, setAddOpen] = useState(false)
-  // Provider the Add key dialog opens preselected to, when the add flow was
-  // entered from a checklist chip rather than the generic Add key button.
   const [addPlatform, setAddPlatform] = useState<Platform | ''>('')
   const [exportOpen, setExportOpen] = useState(false)
 
@@ -44,8 +42,6 @@ export default function KeysPage() {
     setAddOpen(true)
   }
 
-  // Kept at page level for the header's "Check all" gate; ProviderList runs the
-  // same query (deduped by react-query) for the list itself.
   const { data: keys = [] } = useQuery<ApiKey[]>({
     queryKey: ['keys'],
     queryFn: () => apiFetch('/api/keys'),
@@ -71,35 +67,39 @@ export default function KeysPage() {
         title={t('keys.pageTitle')}
         description={t('keys.pageDescription')}
         actions={
-          <>
-            {(tab === 'providers' || tab === 'quotaSignals') && keys.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending}>
-                {checkAll.isPending ? t('keys.checking') : t('keys.checkAll')}
-              </Button>
-            )}
-            {keys.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
-                <Download className="size-3.5" />
-                {t('keys.export')}
-              </Button>
-            )}
-            {tab === 'providers' && (
-              <Button size="sm" onClick={() => openAddKey()}>
-                <Plus className="size-3.5" />
-                {t('keys.addKey')}
-              </Button>
-            )}
-            <SegmentedControl
-              value={tab}
-              onValueChange={setTab}
-              options={KEYS_TABS.map(tb => ({ value: tb.id, label: t(tb.labelKey) }))}
-              ariaLabel={t('keys.pageTitle')}
-            />
-          </>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+              {(tab === 'providers' || tab === 'quotaSignals') && keys.length > 0 && (
+                <Button variant="outline" size="sm" onClick={() => checkAll.mutate()} disabled={checkAll.isPending} className="text-xs">
+                  {checkAll.isPending ? t('keys.checking') : t('keys.checkAll')}
+                </Button>
+              )}
+              {keys.length > 0 && (
+                <Button variant="outline" size="sm" onClick={() => setExportOpen(true)} className="text-xs">
+                  <Download className="size-3.5" />
+                  {t('keys.export')}
+                </Button>
+              )}
+              {tab === 'providers' && (
+                <Button size="sm" onClick={() => openAddKey()} className="text-xs">
+                  <Plus className="size-3.5" />
+                  {t('keys.addKey')}
+                </Button>
+              )}
+            </div>
+            <div className="overflow-x-auto pb-1 sm:pb-0">
+              <SegmentedControl
+                value={tab}
+                onValueChange={setTab}
+                options={KEYS_TABS.map(tb => ({ value: tb.id, label: t(tb.labelKey) }))}
+                ariaLabel={t('keys.pageTitle')}
+              />
+            </div>
+          </div>
         }
       />
 
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {tab === 'apiKey' && (
           <>
             <UnifiedKeySection />
@@ -125,8 +125,6 @@ export default function KeysPage() {
       </div>
 
       <AddKeyDialog open={addOpen} onOpenChange={setAddOpen} initialPlatform={addPlatform || undefined} />
-      {/* Mounted only while open so the export flow always starts at step one
-          and never retains a previously typed password. */}
       {exportOpen && <ExportKeysDialog open={exportOpen} onOpenChange={setExportOpen} />}
     </div>
   )
