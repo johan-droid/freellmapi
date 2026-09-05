@@ -1,17 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, Search, Settings, Sparkles } from 'lucide-react'
+import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, Search, Settings, Sparkles, X } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AuthGate, ChangeCredentialsModal } from '@/components/auth-gate'
@@ -217,9 +213,23 @@ function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  const [expandedNavMenus, setExpandedNavMenus] = useState<Record<string, boolean>>({
+    '/models': true,
+    '/analytics': false,
+  })
   const [credentialsMode, setCredentialsMode] = useState<'password' | 'email' | null>(null)
   const { data: premium, licensed, isLoading: premiumLoading, isError: premiumError } = usePremium()
   const showUpgrade = Boolean(premium) && !licensed && !premiumLoading && !premiumError
+
+  const handleMobileNavigate = (to: string) => {
+    setMobileDrawerOpen(false)
+    navigate(to)
+  }
+
+  const toggleMobileSubmenu = (key: string) => {
+    setExpandedNavMenus((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   return (
     <>
@@ -307,62 +317,197 @@ function Navbar() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <div className="ms-auto md:hidden">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                aria-label={t('nav.openMenu')}
-              >
-                <Menu />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuGroup>
-                  {navItems.map((item) => {
-                    const menu = navMenus[item.to]
-                    return menu ? (
-                      <DropdownMenuSub key={item.to}>
-                        <DropdownMenuSubTrigger
-                          className={menu.isActive(location.pathname) ? 'bg-accent text-accent-foreground font-medium' : undefined}
-                        >
-                          {t(item.labelKey)}
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent>
-                          {menu.items.map((entry) => (
-                            <DropdownMenuItem key={entry.to} onClick={() => navigate(entry.to)}>
-                              {t(entry.labelKey)}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                    ) : (
-                      <DropdownMenuItem
-                        key={item.to}
-                        onClick={() => navigate(item.to)}
-                        className={location.pathname === item.to ? 'bg-accent text-accent-foreground font-medium' : undefined}
-                      >
-                        {t(item.labelKey)}
-                      </DropdownMenuItem>
-                    )
-                  })}
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <AccountMenuItems
-                  showUpgrade={showUpgrade}
-                  upgradeLabel={t('nav.upgrade')}
-                  settingsLabel={t('nav.settings')}
-                  signOutLabel={t('nav.signOut')}
-                  changeEmailLabel={t('auth.changeEmail')}
-                  changePasswordLabel={t('auth.changePassword')}
-                  onUpgrade={() => navigate('/premium')}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                  onChangeEmail={() => setCredentialsMode('email')}
-                  onChangePassword={() => setCredentialsMode('password')}
-                />
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="ms-auto flex items-center gap-1 md:hidden">
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              aria-label={t('palette.title')}
+              className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+            >
+              <Search className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+              aria-label={t('nav.openMenu')}
+            >
+              <Menu className="size-5" />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Mobile Off-canvas Slide-over Drawer Sheet */}
+      {mobileDrawerOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileDrawerOpen(false)}
+          />
+
+          {/* Drawer content */}
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xs flex-col bg-card shadow-2xl ring-1 ring-foreground/10 duration-200 animate-in slide-in-from-right">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <Brand />
+              <button
+                type="button"
+                onClick={() => setMobileDrawerOpen(false)}
+                aria-label={t('common.dismiss')}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+              <nav className="space-y-1">
+                {navItems.map((item) => {
+                  const menu = navMenus[item.to]
+                  const isActive = menu
+                    ? menu.isActive(location.pathname)
+                    : location.pathname === item.to
+
+                  if (!menu) {
+                    return (
+                      <button
+                        key={item.to}
+                        type="button"
+                        onClick={() => handleMobileNavigate(item.to)}
+                        className={`flex w-full items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                          isActive
+                            ? 'bg-accent text-accent-foreground font-semibold'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        }`}
+                      >
+                        {t(item.labelKey)}
+                      </button>
+                    )
+                  }
+
+                  const isExpanded = expandedNavMenus[item.to] ?? false
+
+                  return (
+                    <div key={item.to} className="space-y-1">
+                      <div className="flex items-center justify-between rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => handleMobileNavigate(item.to)}
+                          className={`flex-1 text-left px-3 py-2.5 text-sm font-medium rounded-xl transition-colors ${
+                            isActive
+                              ? 'bg-accent/60 text-accent-foreground font-semibold'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          {t(item.labelKey)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleMobileSubmenu(item.to)}
+                          className="p-2.5 text-muted-foreground hover:text-foreground"
+                          aria-label={t(menu.ariaKey)}
+                        >
+                          <ChevronDown
+                            className={`size-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="ms-3 space-y-1 border-s border-border pl-2 my-1">
+                          {menu.items.map((entry) => {
+                            const isEntryActive = location.pathname === entry.to
+                            return (
+                              <button
+                                key={entry.to}
+                                type="button"
+                                onClick={() => handleMobileNavigate(entry.to)}
+                                className={`flex w-full items-center rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                                  isEntryActive
+                                    ? 'bg-accent text-accent-foreground font-semibold'
+                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                }`}
+                              >
+                                {t(entry.labelKey)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </nav>
+
+              <div className="border-t pt-4 space-y-1">
+                <p className="px-3 pb-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  {t('nav.settings')}
+                </p>
+                {showUpgrade && (
+                  <button
+                    type="button"
+                    onClick={() => handleMobileNavigate('/premium')}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+                  >
+                    <Sparkles className="size-4 text-amber-500" />
+                    {t('nav.upgrade')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDrawerOpen(false)
+                    setSettingsOpen(true)
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+                >
+                  <Settings className="size-4" />
+                  {t('nav.settings')}
+                </button>
+                {!isDesktopApp && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileDrawerOpen(false)
+                        setCredentialsMode('email')
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+                    >
+                      <span className="flex size-4 items-center justify-center font-serif text-xs font-bold">@</span>
+                      {t('auth.changeEmail')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileDrawerOpen(false)
+                        setCredentialsMode('password')
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted"
+                    >
+                      <KeyRound className="size-4" />
+                      {t('auth.changePassword')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileDrawerOpen(false)
+                        logout()
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-destructive hover:bg-destructive/10"
+                    >
+                      <LogOut className="size-4" />
+                      {t('nav.signOut')}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       {credentialsMode && (
         <ChangeCredentialsModal mode={credentialsMode} onClose={() => setCredentialsMode(null)} />
@@ -402,7 +547,7 @@ function PageContainer({ children }: { children: ReactNode }) {
   const location = useLocation()
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
   return (
-    <main className={fullBleed ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto w-full max-w-6xl px-6 py-8'}>
+    <main className={fullBleed ? 'flex min-h-0 flex-1 flex-col' : 'mx-auto w-full max-w-6xl px-3 sm:px-6 py-4 sm:py-8 min-w-0'}>
       {children}
     </main>
   )
@@ -417,7 +562,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
   return (
-    <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen'} ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
+    <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen min-w-0 max-w-full overflow-x-hidden'} ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
       {children}
     </div>
   )
