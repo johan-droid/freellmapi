@@ -4,6 +4,8 @@ import { createApp } from './app.js';
 import { initDb, closePostgresPool } from './db/index.js';
 import { initRoutingRegistry, stopRoutingRegistryScheduler } from './services/router-registry.js';
 import { analyticsAggregator } from './services/analytics-aggregator.js';
+import { startHealthChecker, stopHealthChecker } from './services/health.js';
+import { NodeScheduler } from './lib/scheduler.js';
 import { installProcessSafetyNet } from './lib/process-safety-net.js';
 import { loadConfig } from './lib/config.js';
 import { userCount } from './services/auth.js';
@@ -30,6 +32,9 @@ async function main() {
 
   console.log('[startup] 3/6 Starting memory-first analytics aggregator...');
   analyticsAggregator.start();
+
+  console.log('[startup] 3b/6 Starting credential health checker...');
+  startHealthChecker(new NodeScheduler());
 
   console.log('[startup] 4/6 Checking admin account status...');
   const count = await userCount();
@@ -99,6 +104,7 @@ async function handleShutdown(signal: string) {
 
     // 2. Stop in-memory registry scheduler
     stopRoutingRegistryScheduler();
+    stopHealthChecker();
 
     // 3. Flush pending analytics buffer to Neon PostgreSQL
     console.log('[shutdown] Flushing pending in-memory telemetry to PostgreSQL...');

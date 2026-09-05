@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getActiveRegistry } from '../services/router-registry.js';
+import { getPostgresPool } from '../db/postgres.js';
 import { hasProvider } from '../providers/index.js';
+import { checkKeyHealth, checkAllKeys } from '../services/health.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 
 export const healthRouter = Router();
@@ -86,3 +88,52 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to get health status' });
   }
 });
+
+// POST /api/health/check-all — run a full health pass across every enabled key.
+healthRouter.post('/check-all', async (_req: Request, res: Response) => {
+  try {
+    const result = await checkAllKeys({ force: true });
+    await (await import('../services/router-registry.js')).reloadRoutingRegistry();
+    res.json({ ok: true, checked: result.checkedKeyIds.length, skipped: result.skippedKeyIds.length });
+  } catch (err: any) {
+    console.error('[health] Error running full health check:', err);
+    res.status(500).json({ error: 'Failed to run health check' });
+  }
+});
+
+// POST /api/health/check/:id — health-check a single credential.
+healthRouter.post('/check/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid key ID' });
+      return;
+    }
+    const status = await checkKeyHealth(id);
+    await refreshRuntimeHealth(id);
+    res.json({ ok: true, id, status });
+  } catch (err: any) {
+    console.error('[health] Error checking key:', err);
+    res.status(500).json({ error: 'Failed to check key' });
+  }
+});
+
+// After a health check updates the DB, mirror the fresh error / timestamps into
+// the in-memory registry runtime so /api/health returns them immediately
+// instead of waiting for the next registry reload.
+async function refreshRuntimeHealth(id: number): Promise<void> {
+  const registry = getActiveRegistry();
+  const record = registry.getCredentialById(id);
+  if (!record) return;
+  const pool = getPostgresPool();
+  const res = await pool.query(
+    `SELECT last_health_error, last_checked_at FROM credentials WHERE id = $1`,
+    [id]
+  );
+  const row = res.rows[0];
+  if (!row) return;
+  record.runtime.lastHealthError = row.last_health_error || null;
+  if (row.last_checked_at) {
+    record.runtime.lastUsedAt = new Date(row.last_checked_at).getTime();
+  }
+}
