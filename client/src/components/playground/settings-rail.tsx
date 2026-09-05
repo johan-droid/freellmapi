@@ -144,31 +144,42 @@ export function SettingsRail({
   const tweaked = samplingActiveCount(sampling) > 0 || systemPrompt.trim().length > 0
 
   return (
-    <div
-      className={`relative shrink-0 overflow-hidden border-s bg-card transition-[width] duration-200 ease-out motion-reduce:transition-none ${
-        open ? 'w-72' : 'w-11'
-      }`}
-    >
-      <div
-        className={`${LAYER} w-11 items-center gap-1 py-3 ${
-          open ? 'invisible opacity-0' : 'visible opacity-100'
-        }`}
-      >
-        <Button
-          variant="ghost"
-          size="icon-sm"
+    <>
+      {/* Mobile Backdrop when open on screens < lg */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs lg:hidden"
           onClick={onToggle}
-          aria-label={t('playground.showSettings')}
-          title={t('playground.showSettings')}
-        >
-          <PanelRightOpen className="size-4" />
-        </Button>
-        {tweaked && <span className="size-1.5 rounded-full bg-primary/70" />}
-      </div>
+        />
+      )}
 
       <div
-        className={`${LAYER} w-72 ${open ? 'visible opacity-100' : 'invisible opacity-0'}`}
+        className={`bg-card transition-all duration-200 ease-out motion-reduce:transition-none ${
+          open
+            ? 'fixed inset-y-0 end-0 z-50 w-72 shadow-2xl border-s lg:static lg:z-auto lg:shadow-none'
+            : 'hidden lg:block relative shrink-0 w-11 overflow-hidden border-s'
+        }`}
       >
+        <div
+          className={`${LAYER} w-11 items-center gap-1 py-3 ${
+            open ? 'invisible opacity-0' : 'visible opacity-100'
+          }`}
+        >
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggle}
+            aria-label={t('playground.showSettings')}
+            title={t('playground.showSettings')}
+          >
+            <PanelRightOpen className="size-4" />
+          </Button>
+          {tweaked && <span className="size-1.5 rounded-full bg-primary/70" />}
+        </div>
+
+        <div
+          className={`${LAYER} w-72 ${open ? 'visible opacity-100' : 'invisible opacity-0'}`}
+        >
         <div className="flex shrink-0 items-center gap-1 border-b px-2.5 py-2">
           <span className="flex-1 truncate text-xs font-medium text-muted-foreground">
             {t('settings.title')}
@@ -242,6 +253,6 @@ export function SettingsRail({
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

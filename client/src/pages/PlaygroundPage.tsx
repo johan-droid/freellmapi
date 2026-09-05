@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, ChevronRight, CircleAlert, FileText, Paperclip, X } from 'lucide-react'
+import { ArrowUp, ChevronRight, CircleAlert, FileText, PanelLeftOpen, PanelRightOpen, Paperclip, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { buildModelOptions } from '@/lib/model-groups'
@@ -876,18 +876,41 @@ export default function PlaygroundPage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* The page header, reduced to a slim bar: the title, what is answering,
-            and the one action that belongs to the transcript rather than to a
-            rail. */}
-        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-          <h1 className="shrink-0 text-sm font-semibold tracking-tight">{t('playground.title')}</h1>
+            and mobile triggers for conversation sidebar & settings rail on < lg */}
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 border-b px-3 sm:px-4 py-2">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="lg:hidden shrink-0"
+            onClick={toggleSidebar}
+            aria-label={t('playgroundSessions.showSidebar')}
+            title={t('playgroundSessions.showSidebar')}
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
+
+          <h1 className="shrink-0 text-xs sm:text-sm font-semibold tracking-tight">{t('playground.title')}</h1>
           <span className="min-w-0 truncate text-xs text-muted-foreground">
             <span aria-hidden="true">· </span>{activeModelLabel}
           </span>
-          {messages.length > 0 && (
-            <Button variant="outline" size="sm" className="ms-auto" onClick={handleClear}>
-              {t('playground.clear')}
+
+          <div className="ms-auto flex items-center gap-1">
+            {messages.length > 0 && (
+              <Button variant="outline" size="sm" className="h-7 text-xs px-2 sm:px-3 sm:h-8" onClick={handleClear}>
+                {t('playground.clear')}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="lg:hidden shrink-0"
+              onClick={toggleSettings}
+              aria-label={t('playground.showSettings')}
+              title={t('playground.showSettings')}
+            >
+              <PanelRightOpen className="size-4" />
             </Button>
-          )}
+          </div>
         </div>
 
         <div ref={transcriptRef} className="min-h-0 flex-1 overflow-y-auto p-6 space-y-4">
@@ -915,7 +938,7 @@ export default function PlaygroundPage() {
                     <div className={`flex flex-col gap-1 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                       {showBubble && (
                         <div
-                          className={`group relative rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                          className={`group relative rounded-2xl px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm leading-relaxed ${
                             msg.role === 'user'
                               ? 'bg-primary text-primary-foreground'
                               : msg.isError
