@@ -26,6 +26,7 @@ export interface CredentialRuntimeState {
   rolling429Count: number;
   lastUsedAt: number | null;
   lastFailedAt: number | null;
+  lastHealthError: string | null;
 }
 
 export interface CredentialRecord {
@@ -163,6 +164,10 @@ export class RouterRegistry {
     return Array.from(this.credentialsById.values());
   }
 
+  getModelById(id: number): ModelRecord | undefined {
+    return this.modelsById.get(id);
+  }
+
   getAllModels(): ModelRecord[] {
     return Array.from(this.modelsById.values());
   }
@@ -262,7 +267,8 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
       // 2. Fetch credentials
       const credRows = await pool.query(`
         SELECT id, provider_id, credential_name, encrypted_value, iv, auth_tag,
-               credential_type, enabled, priority, cooldown_until, model_scope
+               credential_type, enabled, priority, cooldown_until, model_scope,
+               last_health_error
         FROM credentials
         ORDER BY priority DESC, id ASC
       `);
@@ -290,6 +296,7 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
               ...existingCred.runtime,
               cooldownUntil: Math.max(cooldownUntilMs, existingCred.runtime.cooldownUntil),
               circuitState: !row.enabled ? 'DISABLED' : (isOnCd ? 'COOLDOWN' : existingCred.runtime.circuitState),
+              lastHealthError: row.last_health_error || existingCred.runtime.lastHealthError,
             }
           : {
               activeRequests: 0,
@@ -301,6 +308,7 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
               rolling429Count: 0,
               lastUsedAt: null,
               lastFailedAt: null,
+              lastHealthError: row.last_health_error || null,
             };
 
         credentials.push({

@@ -46,6 +46,7 @@ keysRouter.get('/', async (_req: Request, res: Response) => {
         c.failure_count,
         c.last_used_at,
         c.last_failed_at,
+        c.last_health_error,
         c.model_scope,
         c.encrypted_value,
         c.iv,
@@ -86,7 +87,7 @@ keysRouter.get('/', async (_req: Request, res: Response) => {
         exportable: true,
         createdAt: new Date(row.created_at).toISOString(),
         lastCheckedAt: row.last_used_at ? new Date(row.last_used_at).toISOString() : null,
-        lastHealthError: row.last_failed_at ? 'Recent failure recorded' : null,
+        lastHealthError: row.last_health_error || null,
         modelScope: row.model_scope || null,
       };
     });

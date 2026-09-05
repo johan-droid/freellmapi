@@ -70,6 +70,8 @@ healthRouter.get('/', (_req: Request, res: Response) => {
         cooldownRemainingMs: Math.max(0, c.runtime.cooldownUntil - now),
         lastUsedAt: c.runtime.lastUsedAt ? new Date(c.runtime.lastUsedAt).toISOString() : null,
         lastFailedAt: c.runtime.lastFailedAt ? new Date(c.runtime.lastFailedAt).toISOString() : null,
+        lastCheckedAt: c.runtime.lastUsedAt ? new Date(c.runtime.lastUsedAt).toISOString() : null,
+        lastHealthError: c.runtime.lastHealthError,
       };
     });
 
