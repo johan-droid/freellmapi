@@ -91,7 +91,10 @@ keysRouter.get('/', async (_req: Request, res: Response) => {
       };
     });
 
-    res.json({ keys, total: keys.length });
+    // The dashboard's ['keys'] queries expect a bare array (see
+    // provider-list, export-keys-dialog, add-key-form, getting-started);
+    // returning an object here crashes them with "filter is not a function".
+    res.json(keys);
   } catch (err: any) {
     console.error('[keys] Error fetching keys:', err);
     res.status(500).json({ error: 'Failed to fetch API keys' });
