@@ -146,11 +146,28 @@ export async function up(client: pg.PoolClient | pg.Pool): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- 11. Media models table
+    CREATE TABLE IF NOT EXISTS media_models (
+      id SERIAL PRIMARY KEY,
+      platform VARCHAR(64) NOT NULL,
+      model_id VARCHAR(128) NOT NULL,
+      display_name VARCHAR(128) NOT NULL,
+      modality VARCHAR(32) NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      quota_label VARCHAR(128) DEFAULT '',
+      key_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+      meta_json TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
 export async function down(client: pg.PoolClient | pg.Pool): Promise<void> {
   await client.query(`
+    DROP TABLE IF EXISTS media_models CASCADE;
     DROP TABLE IF EXISTS playground_conversations CASCADE;
     DROP TABLE IF EXISTS sessions CASCADE;
     DROP TABLE IF EXISTS users CASCADE;

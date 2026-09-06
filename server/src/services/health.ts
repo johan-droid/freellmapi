@@ -283,7 +283,6 @@ async function runHealthPass(opts: HealthPassOptions): Promise<HealthPassResult>
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realSleep;
   const check = opts.check ?? checkKeyHealth;
-  const now_ = now();
 
   const { rows } = await pool().query<HealthKeyRow>(`
     SELECT c.id, p.provider_key AS platform, p.base_url,

@@ -10,14 +10,10 @@ import {
   deleteSession,
   updateEmail,
   updatePassword,
-  resetUserPassword,
 } from '../services/auth.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
-import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
 
 export const authRouter = Router();
-
-const failedPasswordAttempts = new Map<number, number>();
 
 const signupSchema = z.object({
   email: z.string().email('A valid email is required'),

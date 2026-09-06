@@ -14,7 +14,8 @@
  * keep their pre-unification behavior.
  */
 import { z } from 'zod';
-import { getDb, getSetting, setSetting } from '../db/index.js';
+import { getSetting, setSetting } from '../db/index.js';
+import { getActiveRegistry } from './router-registry.js';
 import {
   ENDPOINT_ID_SEPARATOR,
   endpointRefMatches,
@@ -367,13 +368,15 @@ let groupsCache: { fingerprint: string; groups: ModelGroup[] } | null = null;
  * and resolution is complete), applying the persisted overrides.
  */
 export function getModelGroups(): ModelGroup[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT m.id as model_db_id, m.platform, m.model_id, m.display_name, m.intelligence_rank,
-           m.endpoint_scope
-    FROM models m
-    ORDER BY m.id
-  `).all() as GroupableRow[];
+  const allModels = getActiveRegistry().getAllModels();
+  const rows: GroupableRow[] = allModels.map(m => ({
+    model_db_id: m.id,
+    platform: m.providerKey,
+    model_id: m.modelId,
+    display_name: m.displayName || m.modelId,
+    intelligence_rank: m.priority,
+    endpoint_scope: '',
+  }));
   const overrides = getUnifyOverrides();
   let fingerprint = JSON.stringify(overrides);
   for (const r of rows) {

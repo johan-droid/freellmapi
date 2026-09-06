@@ -6,10 +6,8 @@ import type {
   ChatCompletionChunk,
   ChatToolDefinition,
   ChatToolChoice,
-  TokenUsage,
 } from '@freellmapi/shared/types.js';
 import type { CompletionOptions } from '../providers/base.js';
-import { isRetryableError } from '../lib/error-classify.js';
 
 export interface RoutingRequirements {
   requestedModel?: string;

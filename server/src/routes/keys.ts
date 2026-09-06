@@ -394,7 +394,7 @@ keysRouter.post('/custom/discover-models', async (req: Request, res: Response) =
 
     let targetUrl = baseUrl;
     let targetKey = apiKey || '';
-    let resolvedKeyId = keyId;
+    const resolvedKeyId = keyId;
 
     const pool = getPostgresPool();
     if (keyId && !targetUrl) {
@@ -519,7 +519,7 @@ keysRouter.post('/custom/bulk-models', async (req: Request, res: Response) => {
 
 keysRouter.post('/custom/probe', async (req: Request, res: Response) => {
   try {
-    const { baseUrl, apiKey = '', model } = req.body || {};
+    const { model } = req.body || {};
     res.json({
       ok: true,
       latencyMs: 85,

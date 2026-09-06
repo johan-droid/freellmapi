@@ -117,12 +117,17 @@ export function decrypt(encrypted: string, iv: string, authTag: string): string 
 }
 
 export function maskKey(key: string): string {
-  if (!key) return '••••';
-  if (key.length <= 8) return '••••' + key.slice(-2);
-  
-  // If key has a known prefix like sk- or sk-or-v1-
-  const prefixMatch = key.match(/^([a-zA-Z0-9_\-]+-)/);
-  const prefix = prefixMatch ? prefixMatch[1] : key.slice(0, 4);
+  if (!key || key.length < 5) return '****';
+  if (key.length <= 8) return '****' + key.slice(-2);
+
+  const prefixMatch = key.match(/^([a-zA-Z0-9_-]+-)/);
+  if (prefixMatch) {
+    const prefix = prefixMatch[1];
+    const suffix = key.slice(-4);
+    return `${prefix}••••••••${suffix}`;
+  }
+
+  const prefix = key.slice(0, 4);
   const suffix = key.slice(-4);
-  return `${prefix}••••••••${suffix}`;
+  return `${prefix}...${suffix}`;
 }

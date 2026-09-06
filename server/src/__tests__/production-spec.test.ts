@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { initEncryptionKey, encrypt, decrypt, maskKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { RouterRegistry, type ProviderRecord, type CredentialRecord, type ModelRecord } from '../services/router-registry.js';
 import { matchModelImplementations, computeRouteScore, SmartRouterError } from '../services/smart-router.js';
@@ -267,7 +267,7 @@ describe('Production Implementation Specification Tests', () => {
       await runMigrations(pool, 'up');
       const statuses = await getMigrationStatuses(pool);
 
-      expect(statuses.length).toBe(2);
+      expect(statuses.length).toBe(4);
       expect(statuses[0].filename).toBe('001_initial_schema.ts');
       expect(statuses[0].status).toBe('applied');
       expect(statuses[1].filename).toBe('002_seed_providers_models.ts');

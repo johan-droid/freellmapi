@@ -28,7 +28,6 @@
     "db:migration:create": "npm run db:migration:create -w server"
   },
   "devDependencies": {
-    "@rolldown/binding-linux-x64-gnu": "^1.2.7",
     "concurrently": "^9.1.2",
     "jsdom": "^27.4.0"
   },

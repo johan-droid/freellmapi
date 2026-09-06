@@ -13,7 +13,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     (req as Request & { user?: typeof session }).user = session;
     next();
-  } catch (err) {
+  } catch (_err) {
     res.status(401).json({ error: { message: 'Authentication failed', type: 'authentication_error' } });
   }
 }
