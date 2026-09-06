@@ -6,6 +6,7 @@ import {
   SEED_PROVIDERS_MODELS_FILENAME,
   ADD_HEALTH_COLUMNS_FILENAME,
   FIX_SETTINGS_UPDATED_AT_FILENAME,
+  ADD_MISSING_MODEL_COLUMNS_FILENAME,
 } from '../../../db/migrate/defaults.js';
 
 describe('PostgreSQL migration runner', () => {
@@ -15,7 +16,7 @@ describe('PostgreSQL migration runner', () => {
     await runMigrations(pool, 'up');
 
     const statuses = await getMigrationStatuses(pool);
-    expect(statuses.length).toBe(4);
+    expect(statuses.length).toBe(5);
     expect(statuses.every(s => s.status === 'applied')).toBe(true);
 
     expect(statuses.map(s => s.filename)).toEqual([
@@ -23,6 +24,7 @@ describe('PostgreSQL migration runner', () => {
       SEED_PROVIDERS_MODELS_FILENAME,
       ADD_HEALTH_COLUMNS_FILENAME,
       FIX_SETTINGS_UPDATED_AT_FILENAME,
+      ADD_MISSING_MODEL_COLUMNS_FILENAME,
     ]);
 
     // Verify providers seeded
