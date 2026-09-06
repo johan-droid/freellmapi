@@ -277,8 +277,12 @@ function createInMemoryMockPool() {
 
     if (upper.startsWith('INSERT INTO SETTINGS')) {
       const rows = tables.get('settings') || [];
-      const key = params[0];
-      const value = params[1];
+      let key = params[0];
+      let value = params[1];
+      if (upper.includes("'UNIFIED_API_KEY'")) {
+        key = 'unified_api_key';
+        value = params[0];
+      }
       const existing = rows.find(r => r.key === key);
       if (existing) {
         existing.value = value;
