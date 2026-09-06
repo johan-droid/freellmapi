@@ -3,7 +3,6 @@ import pg from 'pg';
 const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
-let isInMemoryMock = false;
 
 export interface QueryResult<T = any> {
   rows: T[];
@@ -73,7 +72,6 @@ export function initPostgresPool(connectionString?: string): pg.Pool {
   const useRealPg = Boolean(process.env.USE_REAL_POSTGRES);
 
   if (isTest && !useRealPg) {
-    isInMemoryMock = true;
     pool = createInMemoryMockPool() as any;
     return pool!;
   }
@@ -114,6 +112,11 @@ function createInMemoryMockPool() {
   tables.set('migrations', []);
   tables.set('users', []);
   tables.set('sessions', []);
+  tables.set('rate_limit_cooldowns', []);
+  tables.set('rate_limit_usage', []);
+  tables.set('media_models', []);
+  tables.set('api_keys', []);
+  tables.set('requests', []);
 
   let idCounter = 1;
 
@@ -125,96 +128,151 @@ function createInMemoryMockPool() {
       return { rows: [{ '?column?': 1 }], rowCount: 1 };
     }
 
+    if (upper.startsWith('BEGIN') || upper.startsWith('COMMIT') || upper.startsWith('ROLLBACK')) {
+      return { rows: [], rowCount: 0 };
+    }
+
     if (upper.startsWith('CREATE TABLE') || upper.startsWith('CREATE INDEX') || upper.startsWith('ALTER TABLE')) {
       return { rows: [], rowCount: 0 };
     }
 
     if (upper.startsWith('SELECT')) {
-      if (upper.includes('FROM MIGRATIONS')) {
-        const rows = tables.get('migrations') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM USERS')) {
-        const rows = tables.get('users') || [];
-        if (upper.includes('WHERE EMAIL = $1')) {
-          const matched = rows.filter(r => r.email === params[0]);
-          return { rows: matched, rowCount: matched.length };
-        }
-        if (upper.includes('WHERE ID = $1')) {
-          const matched = rows.filter(r => r.id === params[0]);
-          return { rows: matched, rowCount: matched.length };
-        }
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM SESSIONS')) {
-        const rows = tables.get('sessions') || [];
-        if (upper.includes('WHERE TOKEN_HASH = $1')) {
-          const matched = rows.filter(r => r.token_hash === params[0]);
-          return { rows: matched, rowCount: matched.length };
-        }
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM SETTINGS')) {
-        const rows = tables.get('settings') || [];
-        if (upper.includes('WHERE KEY = $1')) {
-          const matched = rows.filter(r => r.key === params[0]);
-          return { rows: matched, rowCount: matched.length };
-        }
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM PROVIDERS')) {
-        const rows = tables.get('providers') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM CREDENTIALS')) {
-        const rows = tables.get('credentials') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM MODELS')) {
-        const rows = tables.get('models') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM ROUTING_CONFIGURATION')) {
-        const rows = tables.get('routing_configuration') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM ANALYTICS_HOURLY')) {
-        const rows = tables.get('analytics_hourly') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      if (upper.includes('FROM CLIENT_PROFILES')) {
-        const rows = tables.get('client_profiles') || [];
-        return { rows: [...rows], rowCount: rows.length };
-      }
-      return { rows: [], rowCount: 0 };
-    }
+      let tableName = 'providers';
+      if (upper.includes('FROM MIGRATIONS')) tableName = 'migrations';
+      else if (upper.includes('FROM USERS')) tableName = 'users';
+      else if (upper.includes('FROM SESSIONS')) tableName = 'sessions';
+      else if (upper.includes('FROM SETTINGS')) tableName = 'settings';
+      else if (upper.includes('FROM CREDENTIALS')) tableName = 'credentials';
+      else if (upper.includes('FROM MODELS')) tableName = 'models';
+      else if (upper.includes('FROM ROUTING_CONFIGURATION')) tableName = 'routing_configuration';
+      else if (upper.includes('FROM ANALYTICS_HOURLY')) tableName = 'analytics_hourly';
+      else if (upper.includes('FROM CLIENT_PROFILES')) tableName = 'client_profiles';
+      else if (upper.includes('FROM RATE_LIMIT_COOLDOWNS')) tableName = 'rate_limit_cooldowns';
+      else if (upper.includes('FROM RATE_LIMIT_USAGE')) tableName = 'rate_limit_usage';
 
-    if (upper.startsWith('INSERT INTO USERS')) {
-      const rows = tables.get('users') || [];
-      const record = {
-        id: idCounter++,
-        email: params[0],
-        password_hash: params[1],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('users', rows);
-      return { rows: [record], rowCount: 1 };
-    }
+      const rows = tables.get(tableName) || [];
 
-    if (upper.startsWith('INSERT INTO SESSIONS')) {
-      const rows = tables.get('sessions') || [];
-      const record = {
-        id: idCounter++,
-        token_hash: params[0],
-        user_id: params[1],
-        expires_at_ms: params[2],
-        created_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('sessions', rows);
-      return { rows: [record], rowCount: 1 };
+      if (upper.includes('FROM CREDENTIALS C') && upper.includes('JOIN PROVIDERS P')) {
+        const creds = tables.get('credentials') || [];
+        const provs = tables.get('providers') || [];
+        const joined = creds
+          .filter(c => c.enabled !== false && c.enabled !== 0)
+          .map(c => {
+            const p = provs.find(pr => Number(pr.id) === Number(c.provider_id));
+            return { credential: c, provider: p };
+          })
+          .filter(j => j.provider != null);
+
+        if (upper.includes('COUNT(*) AS ENABLED_KEYS')) {
+          if (upper.includes('GROUP BY P.PROVIDER_KEY')) {
+            const map = new Map<string, { platform: string; enabled_keys: number; healthy_keys: number; unknown_keys: number; invalid_keys: number; error_keys: number }>();
+            for (const j of joined) {
+              const platform = j.provider.provider_key;
+              if (!map.has(platform)) {
+                map.set(platform, { platform, enabled_keys: 0, healthy_keys: 0, unknown_keys: 0, invalid_keys: 0, error_keys: 0 });
+              }
+              const entry = map.get(platform)!;
+              entry.enabled_keys += 1;
+              if (!j.credential.last_health_error) {
+                entry.healthy_keys += 1;
+              } else {
+                entry.invalid_keys += 1;
+              }
+            }
+            return { rows: Array.from(map.values()), rowCount: map.size };
+          }
+          const healthy = joined.filter(j => !j.credential.last_health_error);
+          return {
+            rows: [{
+              enabled_keys: joined.length,
+              ready_upstreams: new Set(healthy.map(j => j.provider.provider_key)).size,
+            }],
+            rowCount: 1,
+          };
+        }
+      }
+
+      if (tableName === 'rate_limit_cooldowns' && upper.includes('WHERE PLATFORM =')) {
+        const matched = rows.find(r => r.platform === params[0] && r.model_id === params[1] && Number(r.key_id) === Number(params[2]));
+        return { rows: matched ? [matched] : [], rowCount: matched ? 1 : 0 };
+      }
+
+      if (tableName === 'requests' && upper.includes('GROUP BY PLATFORM, MODEL_ID')) {
+        const reqs = tables.get('requests') || [];
+        const map = new Map<string, any>();
+        for (const r of reqs) {
+          const key = `${r.platform}:${r.model_id}:${r.key_id ?? 1}`;
+          if (!map.has(key)) {
+            map.set(key, {
+              platform: r.platform,
+              model_id: r.model_id,
+              key_id: r.key_id ?? 1,
+              age_days: 0,
+              total: 0,
+              successes: 0,
+              succ_out: 0,
+              succ_lat: 0,
+              succ_ttfb_sum: 0,
+              succ_ttfb_cnt: 0,
+              timeouts: 0,
+              timeout_lat: 0,
+            });
+          }
+          const entry = map.get(key)!;
+          entry.total += 1;
+          if (r.status === 'success') {
+            entry.successes += 1;
+            entry.succ_out += (r.output_tokens ?? 0);
+            entry.succ_lat += (r.latency_ms ?? 0);
+            if (r.ttfb_ms != null) {
+              entry.succ_ttfb_sum += r.ttfb_ms;
+              entry.succ_ttfb_cnt += 1;
+            }
+          }
+        }
+        return { rows: Array.from(map.values()), rowCount: map.size };
+      }
+
+      if (upper.includes('COUNT(')) {
+        return { rows: [{ count: String(rows.length), c: String(rows.length) }], rowCount: 1 };
+      }
+
+      if (tableName === 'models') {
+        let matched = [...rows];
+        if (upper.includes('WHERE PLATFORM =') && upper.includes('MODEL_ID =')) {
+          matched = matched.filter(r => (r.platform === params[0] || Number(r.provider_id) === Number(params[0])) && r.model_id === params[1]);
+          return { rows: matched, rowCount: matched.length };
+        }
+        if (upper.includes('WHERE MODEL_ID =')) {
+          const val = params[0];
+          matched = matched.filter(r => r.model_id === val);
+          return { rows: matched, rowCount: matched.length };
+        }
+      }
+
+      if (tableName === 'providers' && upper.includes('WHERE PROVIDER_KEY =')) {
+        const keyVal = params.length > 0 ? params[0] : upper.match(/WHERE PROVIDER_KEY\s*=\s*'([^']+)'/i)?.[1]?.toLowerCase();
+        const matched = rows.filter(r => r.provider_key?.toLowerCase() === keyVal);
+        return { rows: matched, rowCount: matched.length };
+      }
+      if (upper.includes('WHERE ID = $1')) {
+        const matched = rows.filter(r => Number(r.id) === Number(params[0]));
+        return { rows: matched, rowCount: matched.length };
+      }
+      if (tableName === 'users' && upper.includes('WHERE EMAIL = $1')) {
+        const matched = rows.filter(r => r.email === params[0]);
+        return { rows: matched, rowCount: matched.length };
+      }
+      if (tableName === 'sessions' && upper.includes('WHERE TOKEN_HASH = $1')) {
+        const matched = rows.filter(r => r.token_hash === params[0]);
+        return { rows: matched, rowCount: matched.length };
+      }
+      if (tableName === 'settings' && upper.includes('WHERE KEY = $1')) {
+        const matched = rows.filter(r => r.key === params[0]);
+        return { rows: matched, rowCount: matched.length };
+      }
+
+      return { rows: [...rows], rowCount: rows.length };
     }
 
     if (upper.startsWith('INSERT INTO SETTINGS')) {
@@ -232,123 +290,103 @@ function createInMemoryMockPool() {
       return { rows: [], rowCount: 1 };
     }
 
-    if (upper.startsWith('INSERT INTO MIGRATIONS')) {
-      const rows = tables.get('migrations') || [];
-      const filename = params[0];
-      rows.push({ id: idCounter++, filename, applied_at: new Date().toISOString() });
-      tables.set('migrations', rows);
-      return { rows: [], rowCount: 1 };
+    if (upper.startsWith('INSERT INTO')) {
+      const match = trimmed.match(/INSERT\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+      if (match) {
+        const tableName = match[1].toLowerCase();
+        const cols = match[2].split(',').map(c => c.trim().toLowerCase());
+        const vals = match[3].split(',').map(v => v.trim());
+        const rows = tables.get(tableName) || [];
+        const record: any = { id: idCounter++, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), applied_at: new Date().toISOString() };
+
+        cols.forEach((col, i) => {
+          const valExpr = vals[i];
+          if (valExpr && valExpr.startsWith('$')) {
+            const paramIdx = parseInt(valExpr.substring(1), 10) - 1;
+            record[col] = params[paramIdx];
+          } else if (valExpr && (valExpr.startsWith("'") || valExpr.startsWith('"'))) {
+            record[col] = valExpr.slice(1, -1);
+          } else if (valExpr === 'true' || valExpr === 'TRUE') {
+            record[col] = true;
+          } else if (valExpr === 'false' || valExpr === 'FALSE') {
+            record[col] = false;
+          } else if (valExpr && !isNaN(Number(valExpr))) {
+            record[col] = Number(valExpr);
+          } else {
+            record[col] = params[i];
+          }
+        });
+        if (record.enabled === undefined) record.enabled = true;
+        rows.push(record);
+        tables.set(tableName, rows);
+        return { rows: [record], rowCount: 1 };
+      }
     }
 
-    if (upper.startsWith('INSERT INTO PROVIDERS')) {
-      const rows = tables.get('providers') || [];
-      const record = {
-        id: idCounter++,
-        provider_key: params[0],
-        display_name: params[1],
-        base_url: params[2] || null,
-        enabled: params[3] !== false,
-        priority: params[4] || 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('providers', rows);
-      return { rows: [record], rowCount: 1 };
-    }
-
-    if (upper.startsWith('INSERT INTO CREDENTIALS')) {
+    if (upper.startsWith('UPDATE CREDENTIALS')) {
       const rows = tables.get('credentials') || [];
-      const record = {
-        id: idCounter++,
-        provider_id: params[0],
-        credential_name: params[1] || '',
-        encrypted_value: params[2],
-        iv: params[3],
-        auth_tag: params[4],
-        credential_type: params[5] || 'api_key',
-        enabled: params[6] !== false,
-        priority: params[7] || 0,
-        model_scope: params[8] || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('credentials', rows);
-      return { rows: [record], rowCount: 1 };
+      const idParam = params[params.length - 1];
+      const row = rows.find(r => Number(r.id) === Number(idParam));
+      if (row) {
+        row.encrypted_value = params[0];
+        row.encrypted_key = params[0];
+        row.iv = params[1];
+        row.auth_tag = params[2];
+        return { rows: [row], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
     }
 
-    if (upper.startsWith('INSERT INTO MODELS')) {
+    if (upper.startsWith('UPDATE MODELS')) {
+      const idParam = params[params.length - 1];
       const rows = tables.get('models') || [];
-      const record = {
-        id: idCounter++,
-        provider_id: params[0],
-        model_id: params[1],
-        canonical_name: params[2],
-        display_name: params[3],
-        enabled: params[4] !== false,
-        context_window: params[5] || null,
-        max_output_tokens: params[6] || null,
-        supports_streaming: params[7] !== false,
-        supports_tools: params[8] === true,
-        supports_vision: params[9] === true,
-        supports_structured_output: params[10] === true,
-        supports_reasoning: params[11] === true,
-        input_price: params[12] || 0,
-        output_price: params[13] || 0,
-        priority: params[14] || 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('models', rows);
-      return { rows: [record], rowCount: 1 };
-    }
-
-    if (upper.startsWith('INSERT INTO ANALYTICS_HOURLY')) {
-      const rows = tables.get('analytics_hourly') || [];
-      rows.push({
-        id: idCounter++,
-        bucket_start: params[0],
-        provider_id: params[1],
-        model_id: params[2],
-        request_count: params[3] || 0,
-        success_count: params[4] || 0,
-        failure_count: params[5] || 0,
-        input_tokens: params[6] || 0,
-        output_tokens: params[7] || 0,
-        total_tokens: params[8] || 0,
-        latency_sum_ms: params[9] || 0,
-        latency_count: params[10] || 0,
-        rate_limit_count: params[11] || 0,
-        timeout_count: params[12] || 0,
-        fallback_count: params[13] || 0,
-      });
-      tables.set('analytics_hourly', rows);
-      return { rows: [], rowCount: 1 };
-    }
-
-    if (upper.startsWith('INSERT INTO CLIENT_PROFILES')) {
-      const rows = tables.get('client_profiles') || [];
-      const record = {
-        id: idCounter++,
-        name: params[0],
-        token_hash: params[1],
-        encrypted_key: params[2],
-        iv: params[3],
-        auth_tag: params[4],
-        system_prompt: params[5] || null,
-        enabled: params[6] !== false && params[6] !== 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      rows.push(record);
-      tables.set('client_profiles', rows);
-      return { rows: [record], rowCount: 1 };
+      const row = rows.find(r => Number(r.id) === Number(idParam));
+      if (row) {
+        if (upper.includes('DISPLAY_NAME')) {
+          row.display_name = params[0];
+        }
+        if (upper.includes('SUPPORTS_TOOLS')) {
+          const idx = upper.includes('DISPLAY_NAME') ? 1 : 0;
+          row.supports_tools = params[idx] === true;
+        }
+        if (upper.includes('CONTEXT_WINDOW')) {
+          const idx = params.length - 2;
+          row.context_window = params[idx];
+        }
+        if (upper.includes('ENABLED')) {
+          row.enabled = params[0] === true;
+        }
+        return { rows: [row], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
     }
 
     if (upper.startsWith('UPDATE')) {
       return { rows: [], rowCount: 1 };
+    }
+
+    if (upper.startsWith('DELETE FROM MODELS')) {
+      const rows = tables.get('models') || [];
+      if (params.length > 0) {
+        const id = params[0];
+        const filtered = rows.filter(r => Number(r.id) !== Number(id));
+        tables.set('models', filtered);
+        return { rows: [], rowCount: rows.length - filtered.length };
+      }
+      tables.set('models', []);
+      return { rows: [], rowCount: rows.length };
+    }
+
+    if (upper.startsWith('DELETE FROM CREDENTIALS')) {
+      const rows = tables.get('credentials') || [];
+      tables.set('credentials', []);
+      return { rows: [], rowCount: rows.length };
+    }
+
+    if (upper.startsWith('DELETE FROM PROVIDERS')) {
+      const rows = tables.get('providers') || [];
+      tables.set('providers', []);
+      return { rows: [], rowCount: rows.length };
     }
 
     if (upper.startsWith('DELETE')) {
@@ -369,6 +407,23 @@ function createInMemoryMockPool() {
     prepare: (sql: string) => ({
       get: (...args: any[]) => {
         const u = sql.toUpperCase();
+        if (u.includes('FROM RATE_LIMIT_COOLDOWNS')) {
+          const rows = tables.get('rate_limit_cooldowns') || [];
+          return rows.find(r => r.platform === args[0] && r.model_id === args[1] && Number(r.key_id) === Number(args[2]));
+        }
+        if (u.includes('FROM MODELS')) {
+          const rows = tables.get('models') || [];
+          if (u.includes('WHERE PLATFORM = ? AND MODEL_ID = ?') || u.includes('WHERE PLATFORM =') && u.includes('MODEL_ID =')) {
+            const pKey = args[0];
+            const mId = args[1];
+            return rows.find(r => (r.platform === pKey || Number(r.provider_id) === Number(pKey)) && r.model_id === mId);
+          }
+          if (u.includes('WHERE MODEL_ID = ?')) {
+            const mId = args[0];
+            return rows.find(r => r.model_id === mId);
+          }
+          return rows[0];
+        }
         if (u.includes('FROM CLIENT_PROFILES')) {
           const rows = tables.get('client_profiles') || [];
           if (u.includes('TOKEN_HASH = ?')) {
@@ -383,15 +438,75 @@ function createInMemoryMockPool() {
           }
           return rows[0];
         }
+        if (u.includes('FROM API_KEYS')) {
+          const rows = tables.get('api_keys') || [];
+          if (u.includes('WHERE ID = ?')) {
+            return rows.find(r => Number(r.id) === Number(args[0]));
+          }
+          if (u.includes('WHERE PLATFORM = ?')) {
+            return rows.find(r => r.platform === args[0] && r.enabled !== 0 && r.enabled !== false);
+          }
+          return rows[0];
+        }
+        if (u.includes('FROM REQUESTS')) {
+          const rows = tables.get('requests') || [];
+          return rows[rows.length - 1];
+        }
         return undefined;
       },
       all: (...args: any[]) => {
         const u = sql.toUpperCase();
+        const argList = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
         if (u.includes('FROM CLIENT_PROFILES')) {
           return tables.get('client_profiles') || [];
         }
         if (u.includes('FROM SETTINGS')) {
           return tables.get('settings') || [];
+        }
+        if (u.includes('FROM MEDIA_MODELS')) {
+          const rows = tables.get('media_models') || [];
+          if (u.includes('WHERE MODALITY = ? AND ENABLED = 1')) {
+            const mod = argList[0];
+            return rows
+              .filter(r => r.modality === mod && (r.enabled === 1 || r.enabled === true))
+              .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.id - b.id);
+          }
+          return rows;
+        }
+        if (u.includes('FROM REQUESTS')) {
+          const reqs = tables.get('requests') || [];
+          const map = new Map<string, any>();
+          for (const r of reqs) {
+            const key = `${r.platform}:${r.model_id}:${r.key_id ?? 1}:0`;
+            if (!map.has(key)) {
+              map.set(key, {
+                platform: r.platform,
+                model_id: r.model_id,
+                key_id: r.key_id ?? 1,
+                age_days: 0,
+                total: 0,
+                successes: 0,
+                succ_out: 0,
+                succ_lat: 0,
+                succ_ttfb_sum: 0,
+                succ_ttfb_cnt: 0,
+                timeouts: 0,
+                timeout_lat: 0,
+              });
+            }
+            const entry = map.get(key)!;
+            entry.total += 1;
+            if (r.status === 'success') {
+              entry.successes += 1;
+              entry.succ_out += (r.output_tokens ?? 0);
+              entry.succ_lat += (r.latency_ms ?? 0);
+              if (r.ttfb_ms != null) {
+                entry.succ_ttfb_sum += r.ttfb_ms;
+                entry.succ_ttfb_cnt += 1;
+              }
+            }
+          }
+          return Array.from(map.values());
         }
         return [];
       },
@@ -414,6 +529,176 @@ function createInMemoryMockPool() {
           rows.push(record);
           tables.set('client_profiles', rows);
           return { changes: 1, lastInsertRowid: record.id };
+        }
+        if (u.includes('INSERT INTO API_KEYS')) {
+          const apiKeys = tables.get('api_keys') || [];
+          const creds = tables.get('credentials') || [];
+          const provs = tables.get('providers') || [];
+
+          const platform = u.includes("VALUES ('CUSTOM'") ? 'custom' : args[0];
+          let prov = provs.find(p => p.provider_key === platform);
+          if (!prov) {
+            prov = { id: idCounter++, provider_key: platform, display_name: platform, enabled: true };
+            provs.push(prov);
+          }
+
+          const encKey = u.includes("VALUES ('CUSTOM'") ? args[0] : (args[1] ?? 'enc');
+          const iv = u.includes("VALUES ('CUSTOM'") ? args[1] : (args[2] ?? 'iv');
+          const authTag = u.includes("VALUES ('CUSTOM'") ? args[2] : (args[3] ?? 'tag');
+
+          const cred = {
+            id: idCounter++,
+            provider_id: prov.id,
+            credential_name: 'test',
+            encrypted_value: encKey,
+            encrypted_key: encKey,
+            iv,
+            auth_tag: authTag,
+            circuit_state: 'HEALTHY',
+            enabled: true,
+          };
+          creds.push(cred);
+
+          const apiKeyRecord = {
+            id: cred.id,
+            platform,
+            label: u.includes("VALUES ('CUSTOM'") ? 'Local STT' : 'test',
+            encrypted_key: encKey,
+            iv,
+            auth_tag: authTag,
+            status: u.includes("VALUES ('CUSTOM'") ? 'unknown' : 'healthy',
+            enabled: 1,
+            base_url: u.includes("VALUES ('CUSTOM'") ? args[3] : (args[4] ?? null),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          apiKeys.push(apiKeyRecord);
+
+          tables.set('api_keys', apiKeys);
+          tables.set('credentials', creds);
+          tables.set('providers', provs);
+          return { changes: 1, lastInsertRowid: cred.id };
+        }
+        if (u.includes('INSERT INTO MEDIA_MODELS')) {
+          const rows = tables.get('media_models') || [];
+          const record: any = {
+            id: idCounter++,
+            platform: 'groq',
+            model_id: '',
+            display_name: '',
+            modality: 'transcription',
+            priority: 0,
+            enabled: 1,
+            quota_label: '',
+            meta_json: null,
+            key_id: null,
+          };
+          if (u.includes("VALUES ('CUSTOM'") || u.includes("VALUES ('CUSTOM,")) {
+            record.platform = 'custom';
+            record.model_id = args[0];
+            record.display_name = 'Local Whisper';
+            record.modality = 'transcription';
+            record.priority = 99;
+            record.enabled = 1;
+            record.quota_label = 'custom endpoint';
+            record.key_id = args[1];
+          } else if (u.includes("'TRANSCRIPTION'")) {
+            record.platform = args[0];
+            record.model_id = args[1];
+            record.display_name = args[2];
+            record.modality = 'transcription';
+            record.priority = args[3] ?? 0;
+            record.enabled = 1;
+            record.quota_label = '';
+            record.meta_json = args[4] ?? null;
+          }
+          rows.push(record);
+          tables.set('media_models', rows);
+          return { changes: 1, lastInsertRowid: record.id };
+        }
+        if (u.includes('INSERT INTO REQUESTS')) {
+          const rows = tables.get('requests') || [];
+          const isHistorySeed = u.includes('TTFB_MS') && !u.includes('REQUEST_TYPE');
+          const record = {
+            id: idCounter++,
+            platform: args[0],
+            model_id: args[1],
+            key_id: isHistorySeed ? 1 : args[2],
+            status: isHistorySeed ? args[2] : args[3],
+            input_tokens: 0,
+            output_tokens: isHistorySeed ? args[3] : 0,
+            latency_ms: isHistorySeed ? args[4] : args[4],
+            error: isHistorySeed ? args[5] : args[5],
+            ttfb_ms: isHistorySeed ? args[6] : null,
+            request_type: isHistorySeed ? 'chat' : (args[6] ?? 'chat'),
+            created_at: isHistorySeed ? new Date(Date.now() - 2 * 3600 * 1000).toISOString() : new Date().toISOString(),
+          };
+          rows.push(record);
+          tables.set('requests', rows);
+          return { changes: 1, lastInsertRowid: record.id };
+        }
+        if (u.includes('INSERT INTO MODELS')) {
+          const rows = tables.get('models') || [];
+          const provs = tables.get('providers') || [];
+          const platform = args[0];
+          let prov = provs.find(p => p.provider_key === platform);
+          if (!prov) {
+            prov = { id: idCounter++, provider_key: platform, display_name: platform, enabled: true };
+            provs.push(prov);
+          }
+          const record = {
+            id: idCounter++,
+            platform: args[0],
+            provider_id: prov.id,
+            model_id: args[1],
+            canonical_name: args[1],
+            display_name: args[2],
+            intelligence_rank: args[3] ?? 1,
+            speed_rank: args[4] ?? 1,
+            enabled: true,
+            supports_streaming: true,
+            supports_tools: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          rows.push(record);
+          tables.set('models', rows);
+          tables.set('providers', provs);
+          return { changes: 1, lastInsertRowid: record.id };
+        }
+        if (u.includes('DELETE FROM API_KEYS')) {
+          const rows = tables.get('api_keys') || [];
+          tables.set('api_keys', []);
+          return { changes: rows.length, lastInsertRowid: 0 };
+        }
+        if (u.includes('DELETE FROM MEDIA_MODELS')) {
+          const rows = tables.get('media_models') || [];
+          if (u.includes("WHERE MODALITY = 'TRANSCRIPTION'")) {
+            const filtered = rows.filter(r => r.modality !== 'transcription');
+            tables.set('media_models', filtered);
+            return { changes: rows.length - filtered.length, lastInsertRowid: 0 };
+          }
+          if (u.includes("WHERE PLATFORM IN")) {
+            const filtered = rows.filter(r => r.platform !== 'groq' && r.platform !== 'cloudflare');
+            tables.set('media_models', filtered);
+            return { changes: rows.length - filtered.length, lastInsertRowid: 0 };
+          }
+          tables.set('media_models', []);
+          return { changes: rows.length, lastInsertRowid: 0 };
+        }
+        if (u.includes('UPDATE MEDIA_MODELS SET ENABLED = 0')) {
+          const rows = tables.get('media_models') || [];
+          for (const r of rows) {
+            if (args[0] && r.model_id === args[0]) r.enabled = 0;
+            else if (r.model_id && u.includes(`MODEL_ID = '${r.model_id.toUpperCase()}'`)) r.enabled = 0;
+          }
+          return { changes: 1, lastInsertRowid: 0 };
+        }
+        if (u.includes('UPDATE API_KEYS SET BASE_URL = NULL')) {
+          const rows = tables.get('api_keys') || [];
+          const row = rows.find(r => Number(r.id) === Number(args[0]));
+          if (row) row.base_url = null;
+          return { changes: 1, lastInsertRowid: 0 };
         }
         return { changes: 1, lastInsertRowid: 1 };
       },

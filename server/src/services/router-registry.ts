@@ -65,6 +65,9 @@ export interface ModelRecord {
   inputPrice: number;
   outputPrice: number;
   priority: number;
+  intelligenceRank?: number;
+  speedRank?: number;
+  sizeLabel?: string;
 }
 
 export interface RoutingConfiguration {
@@ -234,7 +237,7 @@ export function isRegistryInitialized(): boolean {
  */
 export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
   if (reloadPromise) {
-    return reloadPromise;
+    await reloadPromise;
   }
 
   reloadPromise = (async () => {
@@ -278,15 +281,18 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
 
       for (const row of credRows.rows) {
         let decrypted = '';
+        let decryptFailed = false;
         try {
           decrypted = decrypt(row.encrypted_value, row.iv, row.auth_tag);
         } catch {
-          decrypted = row.encrypted_value; // fallback
+          decrypted = '';
+          decryptFailed = true;
         }
 
         const providerKey = providerKeyMap.get(row.provider_id) || 'unknown';
         const cooldownUntilMs = row.cooldown_until ? new Date(row.cooldown_until).getTime() : 0;
         const isOnCd = cooldownUntilMs > now;
+        const isUsable = Boolean(row.enabled) && !decryptFailed && Boolean(decrypted);
 
         // Preserve previous in-memory runtime telemetry if credential existed in previous registry
         const existingCred = activeRegistry?.getCredentialById(row.id);
@@ -295,20 +301,20 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
           ? {
               ...existingCred.runtime,
               cooldownUntil: Math.max(cooldownUntilMs, existingCred.runtime.cooldownUntil),
-              circuitState: !row.enabled ? 'DISABLED' : (isOnCd ? 'COOLDOWN' : existingCred.runtime.circuitState),
-              lastHealthError: row.last_health_error || existingCred.runtime.lastHealthError,
+              circuitState: !isUsable ? 'DISABLED' : (isOnCd ? 'COOLDOWN' : existingCred.runtime.circuitState),
+              lastHealthError: decryptFailed ? 'Decryption failed' : (row.last_health_error || existingCred.runtime.lastHealthError),
             }
           : {
               activeRequests: 0,
               cooldownUntil: cooldownUntilMs,
-              circuitState: !row.enabled ? 'DISABLED' : (isOnCd ? 'COOLDOWN' : 'HEALTHY'),
+              circuitState: !isUsable ? 'DISABLED' : (isOnCd ? 'COOLDOWN' : 'HEALTHY'),
               ewmaLatencyMs: 350,
               rollingSuccessCount: 0,
               rollingFailureCount: 0,
               rolling429Count: 0,
               lastUsedAt: null,
               lastFailedAt: null,
-              lastHealthError: row.last_health_error || null,
+              lastHealthError: decryptFailed ? 'Decryption failed' : (row.last_health_error || null),
             };
 
         credentials.push({
@@ -319,9 +325,15 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
           decryptedKey: decrypted,
           maskedKey: maskKey(decrypted),
           credentialType: row.credential_type || 'api_key',
-          enabled: row.enabled,
+          enabled: isUsable,
           priority: row.priority || 0,
-          modelScope: row.model_scope ? (Array.isArray(row.model_scope) ? row.model_scope : null) : null,
+          modelScope: row.model_scope
+            ? (Array.isArray(row.model_scope)
+                ? row.model_scope
+                : (typeof row.model_scope === 'string' && row.model_scope.startsWith('[')
+                    ? JSON.parse(row.model_scope)
+                    : null))
+            : null,
           runtime: runtimeState,
         });
       }
@@ -331,7 +343,8 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
         SELECT id, provider_id, model_id, canonical_name, display_name, enabled,
                context_window, max_output_tokens, supports_streaming, supports_tools,
                supports_vision, supports_structured_output, supports_reasoning,
-               input_price, output_price, priority
+               input_price, output_price, priority,
+               intelligence_rank, speed_rank, size_label
         FROM models
         ORDER BY priority DESC, id ASC
       `);
@@ -356,6 +369,9 @@ export async function reloadRoutingRegistry(): Promise<RouterRegistry> {
         inputPrice: Number(row.input_price || 0),
         outputPrice: Number(row.output_price || 0),
         priority: row.priority || 0,
+        intelligenceRank: row.intelligence_rank ?? 0,
+        speedRank: row.speed_rank ?? 0,
+        sizeLabel: row.size_label ?? '',
       }));
 
       // 4. Fetch routing configuration

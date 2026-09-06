@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { Platform } from '@freellmapi/shared/types.js';
-import { getDb, getPostgresPool, getUnifiedApiKey } from '../db/index.js';
+import { getPostgresPool, getUnifiedApiKey } from '../db/index.js';
 import { isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { extractApiToken, timingSafeStringEqual } from './proxy.js';
 import { getProvider } from '../providers/index.js';
@@ -76,7 +76,7 @@ statusRouter.get('/readyz', async (_req: Request, res: Response) => {
   `);
   const agg = aggRows[0] as { enabled_keys: number; ready_upstreams: number };
 
-  const readyUpstreams = agg.ready_upstreams ?? 0;
+  const readyUpstreams = Number(agg.ready_upstreams ?? 0);
   if (readyUpstreams > 0) {
     res.json({ status: 'ok', ready_upstreams: readyUpstreams });
     return;
@@ -85,7 +85,7 @@ statusRouter.get('/readyz', async (_req: Request, res: Response) => {
   // Distinguish "nothing configured" from "everything cooling down" from
   // "everything unhealthy" so the caller can act on the specific reason.
   let reason: string;
-  if ((agg.enabled_keys ?? 0) === 0) {
+  if (Number(agg.enabled_keys ?? 0) === 0) {
     reason = 'no_upstreams_configured';
   } else if (getSoonestCooldownExpiry() != null) {
     reason = 'all_upstreams_rate_limited';
@@ -182,17 +182,23 @@ providersRouter.get('/providers', async (req: Request, res: Response) => {
   const counts = { healthy: 0, rate_limited: 0, invalid: 0, unknown: 0 };
 
   const providers = platformRows
-    .filter(p => p.enabled_keys > 0)
+    .filter(p => Number(p.enabled_keys) > 0)
     .map(p => {
+      const healthyKeys = Number(p.healthy_keys);
+      const unknownKeys = Number(p.unknown_keys);
+      const invalidKeys = Number(p.invalid_keys);
+      const errorKeys = Number(p.error_keys);
+      const enabledKeys = Number(p.enabled_keys);
       const onCooldown = resumeByPlatform.has(p.platform);
+
       let status: 'healthy' | 'rate_limited' | 'invalid' | 'unknown';
-      if (p.healthy_keys > 0 && !onCooldown) {
+      if (healthyKeys > 0 && !onCooldown) {
         status = 'healthy';
       } else if (onCooldown) {
         status = 'rate_limited';
-      } else if (p.unknown_keys > 0) {
+      } else if (unknownKeys > 0) {
         status = 'unknown';
-      } else if (p.invalid_keys > 0 || p.error_keys > 0) {
+      } else if (invalidKeys > 0 || errorKeys > 0) {
         status = 'invalid';
       } else {
         status = 'unknown';
@@ -204,7 +210,7 @@ providersRouter.get('/providers', async (req: Request, res: Response) => {
         platform: p.platform,
         name: provider?.name ?? p.platform,
         status,
-        keys: p.enabled_keys,
+        keys: enabledKeys,
       };
       if (status === 'rate_limited') {
         const resumeMs = resumeByPlatform.get(p.platform);

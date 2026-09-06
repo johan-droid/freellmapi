@@ -121,7 +121,7 @@ export function maskKey(key: string): string {
   if (key.length <= 8) return '••••' + key.slice(-2);
   
   // If key has a known prefix like sk- or sk-or-v1-
-  const prefixMatch = key.match(/^([a-zA-Z0-9_\-]+-)/);
+  const prefixMatch = key.match(/^([a-zA-Z0-9_-]+-)/);
   const prefix = prefixMatch ? prefixMatch[1] : key.slice(0, 4);
   const suffix = key.slice(-4);
   return `${prefix}••••••••${suffix}`;

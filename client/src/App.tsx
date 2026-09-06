@@ -553,18 +553,62 @@ function PageContainer({ children }: { children: ReactNode }) {
   )
 }
 
-// The shell column. Padded routes keep `min-h-screen` and scroll as a document;
-// a full-bleed route pins the shell to the dynamic viewport instead, because
-// min-height alone is a floor, not a ceiling: with an indefinite shell height
-// every flex-1 container below grows with its content and the document scrolls
-// rather than the one pane (the Playground transcript) that means to.
+function DesktopShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="hidden md:flex md:flex-col min-h-screen min-w-0 w-full max-w-full overflow-x-hidden">
+      {children}
+    </div>
+  )
+}
+
+function MobileShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex md:hidden flex-col min-h-dvh min-w-0 w-full max-w-full overflow-x-hidden">
+      {children}
+    </div>
+  )
+}
+
 function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const fullBleed = FULL_BLEED_ROUTES.has(location.pathname)
+
   return (
     <div className={`flex flex-col ${fullBleed ? 'h-dvh overflow-hidden' : 'min-h-screen min-w-0 max-w-full overflow-x-hidden'} ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
-      {children}
+      <DesktopShell>{children}</DesktopShell>
+      <MobileShell>{children}</MobileShell>
     </div>
+  )
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to="/models/chat" replace />} />
+      <Route path="/models" element={<Navigate to="/models/chat" replace />} />
+      <Route path="/models/chat" element={<FallbackPage />} />
+      <Route path="/models/chat/:id" element={<ModelDetailPage />} />
+      <Route path="/models/fusion" element={<FusionPage />} />
+      <Route path="/models/embeddings" element={<EmbeddingsPage />} />
+      <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
+      <Route path="/models/image" element={<ImagePage />} />
+      <Route path="/models/image/:id" element={<MediaDetailPage modality="image" />} />
+      <Route path="/models/video" element={<VideoPage />} />
+      <Route path="/models/video/:id" element={<MediaDetailPage modality="video" />} />
+      <Route path="/models/audio" element={<AudioPage />} />
+      <Route path="/models/audio/:id" element={<MediaDetailPage modality="audio" />} />
+      <Route path="/models/transcription/:id" element={<MediaDetailPage modality="transcription" />} />
+      <Route path="/playground" element={<PlaygroundPage />} />
+      <Route path="/keys" element={<KeysPage />} />
+      <Route path="/agents" element={<AgentsPage />} />
+      <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
+      <Route path="/analytics" element={<AnalyticsPage />} />
+      <Route path="/logs" element={<LogsPage />} />
+      <Route path="/premium" element={<PremiumPage />} />
+      <Route path="/test" element={<Navigate to="/playground" replace />} />
+      <Route path="/health" element={<Navigate to="/keys" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
   )
 }
 
@@ -575,40 +619,11 @@ function App() {
         <I18nProvider>
           <BrowserRouter basename={import.meta.env.BASE_URL}>
             <AuthGate>
-              {/* Column, so a full-bleed route can claim the height the navbar
-                  leaves without anyone having to know how tall the navbar is.
-                  Fixed-position children (toaster, palette, reminder) are out of
-                  flow, and a padded route stretches to nothing it can show. */}
               <AppShell>
                 <Navbar />
                 <PageContainer>
                   <PageBoundary>
-                    <Routes>
-                      <Route path="/" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/models" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/models/chat" element={<FallbackPage />} />
-                      <Route path="/models/chat/:id" element={<ModelDetailPage />} />
-                      <Route path="/models/fusion" element={<FusionPage />} />
-                      <Route path="/models/embeddings" element={<EmbeddingsPage />} />
-                      <Route path="/models/embeddings/:id" element={<EmbeddingDetailPage />} />
-                      <Route path="/models/image" element={<ImagePage />} />
-                      <Route path="/models/image/:id" element={<MediaDetailPage modality="image" />} />
-                      <Route path="/models/video" element={<VideoPage />} />
-                      <Route path="/models/video/:id" element={<MediaDetailPage modality="video" />} />
-                      <Route path="/models/audio" element={<AudioPage />} />
-                      <Route path="/models/audio/:id" element={<MediaDetailPage modality="audio" />} />
-                      <Route path="/models/transcription/:id" element={<MediaDetailPage modality="transcription" />} />
-                      <Route path="/playground" element={<PlaygroundPage />} />
-                      <Route path="/keys" element={<KeysPage />} />
-                      <Route path="/agents" element={<AgentsPage />} />
-                      <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
-                      <Route path="/analytics" element={<AnalyticsPage />} />
-                      <Route path="/logs" element={<LogsPage />} />
-                      <Route path="/premium" element={<PremiumPage />} />
-                      <Route path="/test" element={<Navigate to="/playground" replace />} />
-                      <Route path="/health" element={<Navigate to="/keys" replace />} />
-                      <Route path="*" element={<NotFoundPage />} />
-                    </Routes>
+                    <AppRoutes />
                   </PageBoundary>
                 </PageContainer>
                 <Toaster />

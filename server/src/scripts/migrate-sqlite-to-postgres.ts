@@ -202,7 +202,7 @@ async function migrate() {
         );
         stats.clientProfiles++;
       }
-    } catch (e: any) {
+    } catch (_e: any) {
       // client_profiles table may not exist in older SQLite DBs
     }
 

@@ -55,13 +55,13 @@ import type { Db } from '../db/types.js';
 function registryChainRow(m: ModelRecord): ChainRow {
   return {
     model_db_id: m.id,
-    priority: 0,
-    enabled: 1,
+    priority: m.priority ?? 0,
+    enabled: m.enabled ? 1 : 0,
     platform: m.providerKey,
     model_id: m.modelId,
     display_name: m.displayName,
-    intelligence_rank: 0,
-    size_label: '',
+    intelligence_rank: m.intelligenceRank ?? 0,
+    size_label: m.sizeLabel ?? '',
     monthly_token_budget: '',
     rpm_limit: null,
     rpd_limit: null,
@@ -1162,9 +1162,9 @@ function orderChain(chain: ChainRow[], strategy: RoutingStrategy, sampled = true
     // penalty position now means what it says — one position.
     return chain
       .map((e, i) => ({ e, i }))
-      .sort((a, b) => a.e.priority - b.e.priority || a.i - b.i)
+      .sort((a, b) => b.e.priority - a.e.priority || a.i - b.i)
       .map(({ e, i }, rank) => ({ e, i, eff: rank + 1 + getPenalty(e.model_db_id) }))
-      .sort((a, b) => tier(a.e) - tier(b.e) || a.eff - b.eff || a.e.priority - b.e.priority || a.i - b.i)
+      .sort((a, b) => tier(a.e) - tier(b.e) || a.eff - b.eff || b.e.priority - a.e.priority || a.i - b.i)
       .map(x => x.e);
   }
 
@@ -1189,7 +1189,7 @@ function orderChain(chain: ChainRow[], strategy: RoutingStrategy, sampled = true
     .map(e => ({ e, s: scoreChainEntry(e, weights, intelMin, intelMax, sampled, keyCounts, headroomCfg).score }))
     // Higher score first WITHIN a tier; manual priority breaks ties so the chain
     // still matters.
-    .sort((a, b) => tier(a.e) - tier(b.e) || b.s - a.s || a.e.priority - b.e.priority)
+    .sort((a, b) => tier(a.e) - tier(b.e) || b.s - a.s || b.e.priority - a.e.priority)
     .map(x => x.e);
 }
 

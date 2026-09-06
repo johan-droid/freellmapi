@@ -253,6 +253,7 @@ export function SettingsRail({
           </div>
         </div>
       </div>
+      </div>
     </>
   )
 }
