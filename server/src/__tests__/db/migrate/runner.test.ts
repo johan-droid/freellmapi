@@ -8,10 +8,10 @@ describe('PostgreSQL migration runner', () => {
     await runMigrations(pool, 'up');
 
     const statuses = await getMigrationStatuses(pool);
-    expect(statuses.length).toBe(4);
+    expect(statuses.length).toBe(5);
     expect(statuses.every(s => s.status === 'applied')).toBe(true);
 
     const res = await pool.query('SELECT filename FROM migrations ORDER BY id ASC');
-    expect(res.rows.length).toBe(4);
+    expect(res.rows.length).toBe(5);
   });
 });
