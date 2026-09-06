@@ -706,9 +706,25 @@ analyticsRouter.get('/by-key', (_req: Request, res: Response) => {
   res.json([]);
 });
 
-// Stats grouped by client. The hourly aggregate carries no client dimension.
-analyticsRouter.get('/by-client', (_req: Request, res: Response) => {
-  res.json([]);
+// Stats grouped by client. Query raw requests table when available.
+analyticsRouter.get('/by-client', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPostgresPool();
+    const dbRes = await pool.query(
+      `SELECT
+         client_agent as "clientAgent",
+         COUNT(*)::int as requests,
+         ROUND(AVG(CASE WHEN status = 'success' THEN 100.0 ELSE 0.0 END)::numeric, 1)::float as "successRate",
+         ROUND(AVG(latency_ms)::numeric)::int as "avgLatencyMs"
+       FROM requests
+       WHERE client_agent IS NOT NULL
+       GROUP BY client_agent
+       ORDER BY requests DESC`
+    );
+    res.json(dbRes.rows);
+  } catch {
+    res.json([]);
+  }
 });
 
 // Recent errors. Error messages are not persisted by the memory-first

@@ -149,6 +149,7 @@ function createInMemoryMockPool() {
       else if (upper.includes('FROM CLIENT_PROFILES')) tableName = 'client_profiles';
       else if (upper.includes('FROM RATE_LIMIT_COOLDOWNS')) tableName = 'rate_limit_cooldowns';
       else if (upper.includes('FROM RATE_LIMIT_USAGE')) tableName = 'rate_limit_usage';
+      else if (upper.includes('FROM REQUESTS')) tableName = 'requests';
 
       const rows = tables.get(tableName) || [];
 
@@ -195,6 +196,33 @@ function createInMemoryMockPool() {
       if (tableName === 'rate_limit_cooldowns' && upper.includes('WHERE PLATFORM =')) {
         const matched = rows.find(r => r.platform === params[0] && r.model_id === params[1] && Number(r.key_id) === Number(params[2]));
         return { rows: matched ? [matched] : [], rowCount: matched ? 1 : 0 };
+      }
+
+      if (tableName === 'requests' && upper.includes('GROUP BY CLIENT_AGENT')) {
+        const reqs = tables.get('requests') || [];
+        const map = new Map<string, any>();
+        for (const r of reqs) {
+          if (!r.client_agent) continue;
+          if (!map.has(r.client_agent)) {
+            map.set(r.client_agent, {
+              clientAgent: r.client_agent,
+              requests: 0,
+              successes: 0,
+              latencySum: 0,
+            });
+          }
+          const entry = map.get(r.client_agent)!;
+          entry.requests += 1;
+          if (r.status === 'success') entry.successes += 1;
+          entry.latencySum += (r.latency_ms ?? 0);
+        }
+        const rowsRes = Array.from(map.values()).map(e => ({
+          clientAgent: e.clientAgent,
+          requests: e.requests,
+          successRate: Math.round((e.successes / e.requests) * 1000) / 10,
+          avgLatencyMs: Math.round(e.latencySum / e.requests),
+        })).sort((a, b) => b.requests - a.requests);
+        return { rows: rowsRes, rowCount: rowsRes.length };
       }
 
       if (tableName === 'requests' && upper.includes('GROUP BY PLATFORM, MODEL_ID')) {
@@ -626,20 +654,33 @@ function createInMemoryMockPool() {
         if (u.includes('INSERT INTO REQUESTS')) {
           const rows = tables.get('requests') || [];
           const isHistorySeed = u.includes('TTFB_MS') && !u.includes('REQUEST_TYPE');
-          const record = {
-            id: idCounter++,
-            platform: args[0],
-            model_id: args[1],
-            key_id: isHistorySeed ? 1 : args[2],
-            status: isHistorySeed ? args[2] : args[3],
-            input_tokens: 0,
-            output_tokens: isHistorySeed ? args[3] : 0,
-            latency_ms: isHistorySeed ? args[4] : args[4],
-            error: isHistorySeed ? args[5] : args[5],
-            ttfb_ms: isHistorySeed ? args[6] : null,
-            request_type: isHistorySeed ? 'chat' : (args[6] ?? 'chat'),
-            created_at: isHistorySeed ? new Date(Date.now() - 2 * 3600 * 1000).toISOString() : new Date().toISOString(),
-          };
+          const isClientAgentInsert = u.includes('CLIENT_AGENT');
+          const record = isClientAgentInsert
+            ? {
+                id: idCounter++,
+                platform: args[0],
+                model_id: args[1],
+                status: args[2],
+                input_tokens: args[3],
+                output_tokens: args[4],
+                latency_ms: args[5],
+                client_agent: args[6],
+                created_at: new Date().toISOString(),
+              }
+            : {
+                id: idCounter++,
+                platform: args[0],
+                model_id: args[1],
+                key_id: isHistorySeed ? 1 : args[2],
+                status: isHistorySeed ? args[2] : args[3],
+                input_tokens: 0,
+                output_tokens: isHistorySeed ? args[3] : 0,
+                latency_ms: isHistorySeed ? args[4] : args[4],
+                error: isHistorySeed ? args[5] : args[5],
+                ttfb_ms: isHistorySeed ? args[6] : null,
+                request_type: isHistorySeed ? 'chat' : (args[6] ?? 'chat'),
+                created_at: isHistorySeed ? new Date(Date.now() - 2 * 3600 * 1000).toISOString() : new Date().toISOString(),
+              };
           rows.push(record);
           tables.set('requests', rows);
           return { changes: 1, lastInsertRowid: record.id };
