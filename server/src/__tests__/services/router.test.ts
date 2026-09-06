@@ -8,14 +8,15 @@ import {
   setRoutingStrategy,
 } from '../../services/router.js';
 import { setCooldown } from '../../services/ratelimit.js';
+import { reloadRoutingRegistry } from '../../services/router-registry.js';
 
 describe('Router', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
-    initDb(':memory:');
+    await initDb(':memory:');
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const db = getDb();
     // These cases assert the manual priority order specifically; pin it so the
     // bandit (now the default strategy) doesn't reorder by score.
@@ -23,12 +24,7 @@ describe('Router', () => {
     db.prepare('DELETE FROM api_keys').run();
     // Disable active profile so the router falls back to fallback_config
     db.prepare("DELETE FROM settings WHERE key = 'active_profile_id'").run();
-    // Reset fallback order to intelligence ranking
-    const models = db.prepare('SELECT id, intelligence_rank FROM models ORDER BY intelligence_rank ASC').all() as any[];
-    const update = db.prepare('UPDATE fallback_config SET priority = ? WHERE model_db_id = ?');
-    for (let i = 0; i < models.length; i++) {
-      update.run(i + 1, models[i].id);
-    }
+    await reloadRoutingRegistry();
   });
 
   afterEach(() => {
@@ -39,13 +35,14 @@ describe('Router', () => {
     expect(() => routeRequest()).toThrow(/exhausted/i);
   });
 
-  it('should route to highest priority model with available key', () => {
+  it('should route to highest priority model with available key', async () => {
     const db = getDb();
     const { encrypted, iv, authTag } = encrypt('test-groq-key');
     db.prepare(`
       INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('groq', 'test', encrypted, iv, authTag, 'healthy', 1);
+    await reloadRoutingRegistry();
 
     const result = routeRequest();
     expect(result.platform).toBe('groq');

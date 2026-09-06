@@ -542,33 +542,36 @@ function createInMemoryMockPool() {
             provs.push(prov);
           }
 
-          const encKey = u.includes("VALUES ('CUSTOM'") ? args[0] : (args[1] ?? 'enc');
-          const iv = u.includes("VALUES ('CUSTOM'") ? args[1] : (args[2] ?? 'iv');
-          const authTag = u.includes("VALUES ('CUSTOM'") ? args[2] : (args[3] ?? 'tag');
+          const encKey = u.includes("VALUES ('CUSTOM'") ? args[0] : (args[2] ?? args[1] ?? 'enc');
+          const iv = u.includes("VALUES ('CUSTOM'") ? args[1] : (args[3] ?? args[2] ?? 'iv');
+          const authTag = u.includes("VALUES ('CUSTOM'") ? args[2] : (args[4] ?? args[3] ?? 'tag');
+          const statusVal = u.includes("VALUES ('CUSTOM'") ? 'unknown' : (args[5] ?? 'healthy');
+          const enabledVal = u.includes("VALUES ('CUSTOM'") ? true : (args[6] !== 0 && args[6] !== false);
 
           const cred = {
             id: idCounter++,
             provider_id: prov.id,
-            credential_name: 'test',
+            credential_name: args[1] || 'test',
             encrypted_value: encKey,
             encrypted_key: encKey,
             iv,
             auth_tag: authTag,
-            circuit_state: 'HEALTHY',
-            enabled: true,
+            circuit_state: statusVal === 'invalid' ? 'DISABLED' : 'HEALTHY',
+            enabled: enabledVal && statusVal !== 'invalid',
+            last_health_error: statusVal === 'invalid' ? 'Invalid credential' : null,
           };
           creds.push(cred);
 
           const apiKeyRecord = {
             id: cred.id,
             platform,
-            label: u.includes("VALUES ('CUSTOM'") ? 'Local STT' : 'test',
+            label: u.includes("VALUES ('CUSTOM'") ? 'Local STT' : (args[1] || 'test'),
             encrypted_key: encKey,
             iv,
             auth_tag: authTag,
-            status: u.includes("VALUES ('CUSTOM'") ? 'unknown' : 'healthy',
-            enabled: 1,
-            base_url: u.includes("VALUES ('CUSTOM'") ? args[3] : (args[4] ?? null),
+            status: statusVal,
+            enabled: enabledVal ? 1 : 0,
+            base_url: u.includes("VALUES ('CUSTOM'") ? args[3] : (args[7] ?? null),
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
@@ -669,6 +672,7 @@ function createInMemoryMockPool() {
         if (u.includes('DELETE FROM API_KEYS')) {
           const rows = tables.get('api_keys') || [];
           tables.set('api_keys', []);
+          tables.set('credentials', []);
           return { changes: rows.length, lastInsertRowid: 0 };
         }
         if (u.includes('DELETE FROM MEDIA_MODELS')) {
