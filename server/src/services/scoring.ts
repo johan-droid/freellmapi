@@ -513,12 +513,135 @@ export function sampleBeta(alpha: number, beta: number): number {
 }
 
 // ── The combined score ──────────────────────────────────────────────────────
+export type MetricSource = 'observed' | 'inferred' | 'catalog';
+
+export interface QualityMetric {
+  value: number; // 0.0 - 1.0
+  source: MetricSource;
+  sampleCount: number;
+  confidence: number; // 0.0 - 1.0
+  insufficientData: boolean;
+}
+
+export interface WorkloadQualityBreakdown {
+  chat: QualityMetric;
+  coding: QualityMetric;
+  agentic: QualityMetric;
+  vision: QualityMetric;
+}
+
+/**
+ * Calculates workload quality metrics with source metadata, confidence, and insufficientData flag.
+ */
+export function computeWorkloadQuality(
+  sizeLabel: string,
+  intelligenceRank: number,
+  supportsTools: boolean,
+  supportsVision: boolean,
+  observedStats?: {
+    chatSuccesses?: number;
+    chatFailures?: number;
+    codingSuccesses?: number;
+    codingFailures?: number;
+    toolSuccesses?: number;
+    toolFailures?: number;
+    malformedToolCalls?: number;
+    visionSuccesses?: number;
+    visionFailures?: number;
+  }
+): WorkloadQualityBreakdown {
+  const intelScore = intelligenceScore(
+    intelligenceComposite(sizeLabel, intelligenceRank),
+    0,
+    4000
+  );
+
+  // Chat Quality
+  const chatSamples = (observedStats?.chatSuccesses ?? 0) + (observedStats?.chatFailures ?? 0);
+  const chatObserved = chatSamples > 0 ? (observedStats?.chatSuccesses ?? 0) / chatSamples : intelScore;
+  const chatInsufficient = chatSamples < 5;
+  const chatQuality: QualityMetric = {
+    value: chatSamples >= 5 ? chatObserved : (chatObserved * 0.4 + intelScore * 0.6),
+    source: chatSamples >= 10 ? 'observed' : chatSamples > 0 ? 'inferred' : 'catalog',
+    sampleCount: chatSamples,
+    confidence: Math.min(1.0, chatSamples / 20),
+    insufficientData: chatInsufficient,
+  };
+
+  // Coding Quality
+  const codingSamples = (observedStats?.codingSuccesses ?? 0) + (observedStats?.codingFailures ?? 0);
+  const codingObserved = codingSamples > 0 ? (observedStats?.codingSuccesses ?? 0) / codingSamples : intelScore;
+  const codingInsufficient = codingSamples < 5;
+  const codingQuality: QualityMetric = {
+    value: codingSamples >= 5 ? codingObserved : (codingObserved * 0.3 + intelScore * 0.7),
+    source: codingSamples >= 10 ? 'observed' : codingSamples > 0 ? 'inferred' : 'catalog',
+    sampleCount: codingSamples,
+    confidence: Math.min(1.0, codingSamples / 20),
+    insufficientData: codingInsufficient,
+  };
+
+  // Agentic Quality
+  if (!supportsTools) {
+    return {
+      chat: chatQuality,
+      coding: codingQuality,
+      agentic: {
+        value: 0,
+        source: 'catalog',
+        sampleCount: 0,
+        confidence: 1.0,
+        insufficientData: false,
+      },
+      vision: {
+        value: supportsVision ? intelScore : 0,
+        source: 'catalog',
+        sampleCount: 0,
+        confidence: 1.0,
+        insufficientData: false,
+      },
+    };
+  }
+
+  const toolSuccesses = observedStats?.toolSuccesses ?? 0;
+  const toolFailures = observedStats?.toolFailures ?? 0;
+  const malformedCalls = observedStats?.malformedToolCalls ?? 0;
+  const toolSamples = toolSuccesses + toolFailures + malformedCalls;
+  const toolSuccessRate = toolSamples > 0 ? toolSuccesses / toolSamples : intelScore;
+  const agenticInsufficient = toolSamples < 5;
+  const agenticQuality: QualityMetric = {
+    value: toolSamples >= 5 ? toolSuccessRate : (toolSuccessRate * 0.4 + intelScore * 0.6),
+    source: toolSamples >= 10 ? 'observed' : toolSamples > 0 ? 'inferred' : 'catalog',
+    sampleCount: toolSamples,
+    confidence: Math.min(1.0, toolSamples / 20),
+    insufficientData: agenticInsufficient,
+  };
+
+  // Vision Quality
+  const visionSamples = (observedStats?.visionSuccesses ?? 0) + (observedStats?.visionFailures ?? 0);
+  const visionObserved = visionSamples > 0 ? (observedStats?.visionSuccesses ?? 0) / visionSamples : intelScore;
+  const visionQuality: QualityMetric = {
+    value: supportsVision ? (visionSamples >= 5 ? visionObserved : intelScore) : 0,
+    source: supportsVision ? (visionSamples >= 10 ? 'observed' : visionSamples > 0 ? 'inferred' : 'catalog') : 'catalog',
+    sampleCount: visionSamples,
+    confidence: supportsVision ? Math.min(1.0, visionSamples / 20) : 1.0,
+    insufficientData: supportsVision && visionSamples < 5,
+  };
+
+  return {
+    chat: chatQuality,
+    coding: codingQuality,
+    agentic: agenticQuality,
+    vision: visionQuality,
+  };
+}
+
 export interface ScoreInputs {
   reliability: number;   // [0,1] — sampled (routing) or expected (display)
   speed: number;         // [0,1]
   intelligence: number;  // [0,1]
   headroom: number;      // [floor,1] multiplier
   rateLimit: number;     // [floor,1] multiplier
+  workloadQuality?: number; // [0,1] optional workload quality score
 }
 
 /**
@@ -532,5 +655,7 @@ export function combineScore(inputs: ScoreInputs, weights: RoutingWeights): numb
     (weights.reliability * inputs.reliability +
       weights.speed * inputs.speed +
       weights.intelligence * inputs.intelligence) / wSum;
-  return base * inputs.headroom * inputs.rateLimit;
+
+  const workloadMultiplier = inputs.workloadQuality !== undefined ? (0.7 + inputs.workloadQuality * 0.3) : 1.0;
+  return base * inputs.headroom * inputs.rateLimit * workloadMultiplier;
 }

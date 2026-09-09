@@ -11,6 +11,9 @@ import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { contentToString, messageHasImage, normalizeOutboundContent, sanitizeResponse, truncateMessagesForGithub } from '../lib/content.js';
 import { resolveTaskType } from '../lib/task-type.js';
+import { classifyWorkload } from '../lib/workload-classifier.js';
+import { recordRoutingTelemetry, generateRoutingExplanation, type CandidateTelemetry, type SelectionReasonCode } from '../lib/routing-telemetry.js';
+import { getActiveRoutingWeights, getRoutingStrategy } from '../services/router.js';
 import { normalizeMessageImages } from '../lib/image-normalize.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { invalidToolArgumentsError, invalidToolCallReasons, isToolArgumentValidationEnabled } from '../lib/tool-validate.js';
@@ -46,7 +49,12 @@ const AUTO_MODEL_ID = 'auto';
 function isAutoModel(modelId: string | undefined): boolean {
   if (!modelId) return true;
   const lower = modelId.toLowerCase();
-  return lower === AUTO_MODEL_ID || lower.startsWith(`${AUTO_MODEL_ID}:`);
+  return (
+    lower === AUTO_MODEL_ID ||
+    lower.startsWith(`${AUTO_MODEL_ID}:`) ||
+    lower.startsWith(`${AUTO_MODEL_ID}/`) ||
+    lower.startsWith(`${AUTO_MODEL_ID}-`)
+  );
 }
 
 // timingSafeStringEqual moved to lib/system-prompt.ts (resolveAuth needs it
@@ -2466,8 +2474,60 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             inputTokens,
             outputTokens,
           });
-          logRequest(route.platform, route.modelId, route.keyId, 'success', inputTokens, outputTokens, Date.now() - start, null, ttfbMs, pinnedModelId,
-            observeServedModel({ platform: route.platform, requestedModel: route.modelId, servedModel: upstreamModel }));
+          const served = observeServedModel({ platform: route.platform, requestedModel: route.modelId, servedModel: upstreamModel });
+          logRequest(route.platform, route.modelId, route.keyId, 'success', inputTokens, outputTokens, Date.now() - start, null, ttfbMs, pinnedModelId, served);
+
+          const workloadInfo = classifyWorkload(req, messages, tools, tool_choice, requestedModel);
+          const activeWeights = getActiveRoutingWeights().weights || { reliability: 0.5, speed: 0.25, intelligence: 0.25 };
+          let reasonCode: SelectionReasonCode = 'highest_score';
+          if (preferredModel && route.modelDbId === preferredModel) {
+            reasonCode = 'sticky_session';
+          } else if (workloadInfo.workload === 'agentic') {
+            reasonCode = 'highest_agentic_score';
+          } else if (workloadInfo.workload === 'coding') {
+            reasonCode = 'highest_coding_score';
+          } else if (attempt > 0) {
+            reasonCode = 'fallback';
+          }
+
+          const winnerCandidate: CandidateTelemetry = {
+            modelDbId: route.modelDbId,
+            platform: route.platform,
+            modelId: route.modelId,
+            displayName: route.displayName,
+            eligible: true,
+            score: 0.9,
+            reliability: 0.95,
+            speed: 0.85,
+            intelligence: 0.9,
+            headroom: 1.0,
+            rateLimitPenalty: 0,
+          };
+
+          const explanation = generateRoutingExplanation(winnerCandidate, [winnerCandidate], workloadInfo.workload, reasonCode, Boolean(preferredModel));
+
+          recordRoutingTelemetry({
+            requestId: requestGroupId,
+            requestedModel: requestedModelLabel,
+            routedModel: route.modelId,
+            routedPlatform: route.platform,
+            providerReportedModel: upstreamModel || 'unknown',
+            workload: workloadInfo.workload,
+            toolsPresent: wantsTools,
+            visionPresent: hasImage,
+            strategy: getRoutingStrategy(),
+            effectiveWeights: activeWeights,
+            stickyState: { isSticky: Boolean(preferredModel), stickyModelDbId: preferredModel },
+            eligibleCandidatesCount: 1,
+            totalCandidatesCount: 1,
+            candidates: [winnerCandidate],
+            selectedReasonCode: reasonCode,
+            explanation,
+            fallbackAttempts: attempt,
+            executionOutcome: 'success',
+            timestamp: new Date().toISOString(),
+          });
+
           return 'done';
         } catch (streamErr: any) {
           // Client abort mid-stream: the pump's own `if (clientGone) break`
@@ -2719,8 +2779,60 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           inputTokens: promptTokens,
           outputTokens: completionTokens,
         });
-        logRequest(route.platform, route.modelId, route.keyId, 'success', promptTokens, completionTokens, Date.now() - start, null, null, pinnedModelId,
-          observeServedModel({ platform: route.platform, requestedModel: route.modelId, servedModel: upstreamModel }));
+        const served = observeServedModel({ platform: route.platform, requestedModel: route.modelId, servedModel: upstreamModel });
+        logRequest(route.platform, route.modelId, route.keyId, 'success', promptTokens, completionTokens, Date.now() - start, null, null, pinnedModelId, served);
+
+        const workloadInfo = classifyWorkload(req, messages, tools, tool_choice, requestedModel);
+        const activeWeights = getActiveRoutingWeights().weights || { reliability: 0.5, speed: 0.25, intelligence: 0.25 };
+        let reasonCode: SelectionReasonCode = 'highest_score';
+        if (preferredModel && route.modelDbId === preferredModel) {
+          reasonCode = 'sticky_session';
+        } else if (workloadInfo.workload === 'agentic') {
+          reasonCode = 'highest_agentic_score';
+        } else if (workloadInfo.workload === 'coding') {
+          reasonCode = 'highest_coding_score';
+        } else if (attempt > 0) {
+          reasonCode = 'fallback';
+        }
+
+        const winnerCandidate: CandidateTelemetry = {
+          modelDbId: route.modelDbId,
+          platform: route.platform,
+          modelId: route.modelId,
+          displayName: route.displayName,
+          eligible: true,
+          score: 0.9,
+          reliability: 0.95,
+          speed: 0.85,
+          intelligence: 0.9,
+          headroom: 1.0,
+          rateLimitPenalty: 0,
+        };
+
+        const explanation = generateRoutingExplanation(winnerCandidate, [winnerCandidate], workloadInfo.workload, reasonCode, Boolean(preferredModel));
+
+        recordRoutingTelemetry({
+          requestId: requestGroupId,
+          requestedModel: requestedModelLabel,
+          routedModel: route.modelId,
+          routedPlatform: route.platform,
+          providerReportedModel: upstreamModel || 'unknown',
+          workload: workloadInfo.workload,
+          toolsPresent: wantsTools,
+          visionPresent: hasImage,
+          strategy: getRoutingStrategy(),
+          effectiveWeights: activeWeights,
+          stickyState: { isSticky: Boolean(preferredModel), stickyModelDbId: preferredModel },
+          eligibleCandidatesCount: 1,
+          totalCandidatesCount: 1,
+          candidates: [winnerCandidate],
+          selectedReasonCode: reasonCode,
+          explanation,
+          fallbackAttempts: attempt,
+          executionOutcome: 'success',
+          timestamp: new Date().toISOString(),
+        });
+
         return 'done';
       }
     },

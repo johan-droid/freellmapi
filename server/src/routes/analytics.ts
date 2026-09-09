@@ -3,6 +3,10 @@ import type { Request, Response } from 'express';
 import { getPostgresPool } from '../db/postgres.js';
 import { analyticsAggregator } from '../services/analytics-aggregator.js';
 import { FALLBACK_INPUT_PER_M, FALLBACK_OUTPUT_PER_M } from '../db/model-pricing.js';
+import { classifyWorkload } from '../lib/workload-classifier.js';
+import { getRecentRoutingTelemetry, generateRoutingExplanation, type CandidateTelemetry, type SelectionReasonCode } from '../lib/routing-telemetry.js';
+import { getRoutingScores, getActiveRoutingWeights, getRoutingStrategy } from '../services/router.js';
+import { computeWorkloadQuality } from '../services/scoring.js';
 
 export const analyticsRouter = Router();
 
@@ -706,9 +710,177 @@ analyticsRouter.get('/by-key', (_req: Request, res: Response) => {
   res.json([]);
 });
 
-// Stats grouped by client. The hourly aggregate carries no client dimension.
-analyticsRouter.get('/by-client', (_req: Request, res: Response) => {
-  res.json([]);
+// Stats grouped by client agent.
+analyticsRouter.get('/by-client', async (req: Request, res: Response) => {
+  try {
+    const range = (req.query.range as string) ?? '7d';
+    const cutoff = getCutoffDate(range);
+    const pool = getPostgresPool();
+
+    const dbRes = await pool.query(
+      `SELECT
+         COALESCE(client_agent, 'unknown') as client_agent,
+         COUNT(*) as requests,
+         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
+         SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as failure_count,
+         AVG(latency_ms) as avg_latency_ms
+       FROM requests
+       WHERE created_at >= $1::timestamptz
+       GROUP BY client_agent
+       ORDER BY requests DESC`,
+      [cutoff.toISOString()]
+    );
+
+    res.json(dbRes.rows.map(r => {
+      const requests = Number(r.requests || 0);
+      const successCount = Number(r.success_count || 0);
+      const successRate = requests > 0 ? (successCount / requests) * 100 : 0;
+      return {
+        clientAgent: r.client_agent,
+        requests,
+        successRate: round1(successRate),
+        avgLatencyMs: Math.round(Number(r.avg_latency_ms || 0)),
+      };
+    }));
+  } catch (err: any) {
+    console.error('[analytics] Error fetching by-client:', err);
+    res.status(500).json({ error: 'Failed to fetch client stats' });
+  }
+});
+
+// Read-only routing decision simulation
+analyticsRouter.post('/routing/simulate', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const tools = Array.isArray(body.tools) ? body.tools : undefined;
+    const toolChoice = body.tool_choice;
+    const requestedModel = typeof body.requested_model === 'string' ? body.requested_model : (typeof body.model === 'string' ? body.model : 'auto');
+
+    const workloadInfo = classifyWorkload(req, messages, tools, toolChoice, requestedModel);
+    const activeWeights = getActiveRoutingWeights().weights || { reliability: 0.5, speed: 0.25, intelligence: 0.25 };
+    const routingScores = getRoutingScores();
+
+    const candidateTelemetryList: CandidateTelemetry[] = routingScores.scores.map(s => {
+      const workloadQuality = computeWorkloadQuality(
+        'Medium',
+        50,
+        true,
+        true,
+        {
+          chatSuccesses: s.totalRequests,
+          chatFailures: 0,
+        }
+      );
+
+      const eligible = s.enabled;
+      const rejectionReason = !eligible ? 'Model disabled in fallback chain.' : undefined;
+      const qualityValue = workloadQuality[workloadInfo.workload]?.value ?? 0.5;
+
+      return {
+        modelDbId: s.modelDbId,
+        platform: s.platform,
+        modelId: s.modelId,
+        displayName: s.displayName,
+        eligible,
+        score: s.score * (0.7 + qualityValue * 0.3),
+        reliability: s.reliability,
+        speed: s.speed,
+        intelligence: s.intelligence,
+        headroom: s.headroom,
+        rateLimitPenalty: s.rateLimit,
+        rejectionReason,
+        workloadQuality: qualityValue,
+      };
+    });
+
+    const eligibleCandidates = candidateTelemetryList.filter(c => c.eligible);
+    const defaultWinner: CandidateTelemetry = {
+      modelDbId: 0,
+      platform: 'none',
+      modelId: 'none',
+      displayName: 'No Model Available',
+      eligible: false,
+      score: 0,
+      reliability: 0,
+      speed: 0,
+      intelligence: 0,
+      headroom: 0,
+      rateLimitPenalty: 0,
+      rejectionReason: 'No models configured in active chain.',
+    };
+
+    const winner = eligibleCandidates.sort((a, b) => b.score - a.score)[0] || candidateTelemetryList[0] || defaultWinner;
+
+    let reasonCode: SelectionReasonCode = 'highest_score';
+    if (!winner || eligibleCandidates.length === 0) {
+      reasonCode = 'fallback';
+    } else if (eligibleCandidates.length === 1) {
+      reasonCode = 'only_eligible_model';
+    } else if (workloadInfo.workload === 'agentic') {
+      reasonCode = 'highest_agentic_score';
+    } else if (workloadInfo.workload === 'coding') {
+      reasonCode = 'highest_coding_score';
+    }
+
+    const explanation = generateRoutingExplanation(
+      winner,
+      candidateTelemetryList,
+      workloadInfo.workload,
+      reasonCode
+    );
+
+    res.json({
+      workload: workloadInfo.workload,
+      workload_classification: workloadInfo,
+      strategy: getRoutingStrategy(),
+      effective_weights: activeWeights,
+      winner: {
+        model_db_id: winner?.modelDbId,
+        platform: winner?.platform,
+        model_id: winner?.modelId,
+        display_name: winner?.displayName,
+        score: winner?.score,
+        selected_reason_code: reasonCode,
+      },
+      explanation,
+      candidates: candidateTelemetryList,
+    });
+  } catch (err: any) {
+    console.error('[analytics] Simulation error:', err);
+    res.status(500).json({ error: 'Failed to simulate routing decision' });
+  }
+});
+
+analyticsRouter.get('/routing-telemetry', (_req: Request, res: Response) => {
+  res.json(getRecentRoutingTelemetry(50));
+});
+
+analyticsRouter.get('/workload-stats', (_req: Request, res: Response) => {
+  const telemetry = getRecentRoutingTelemetry(500);
+  const workloadCounts: Record<string, { total: number; success: number; agenticSuccess: number; fallback: number }> = {
+    chat: { total: 0, success: 0, agenticSuccess: 0, fallback: 0 },
+    coding: { total: 0, success: 0, agenticSuccess: 0, fallback: 0 },
+    agentic: { total: 0, success: 0, agenticSuccess: 0, fallback: 0 },
+    vision: { total: 0, success: 0, agenticSuccess: 0, fallback: 0 },
+  };
+
+  for (const t of telemetry) {
+    const entry = workloadCounts[t.workload] || { total: 0, success: 0, agenticSuccess: 0, fallback: 0 };
+    entry.total += 1;
+    if (t.executionOutcome === 'success') {
+      entry.success += 1;
+      if (t.toolsPresent) entry.agenticSuccess += 1;
+    }
+    if (t.fallbackAttempts > 0) {
+      entry.fallback += 1;
+    }
+  }
+
+  res.json({
+    totalObserved: telemetry.length,
+    byWorkload: workloadCounts,
+  });
 });
 
 // Recent errors. Error messages are not persisted by the memory-first

@@ -1322,13 +1322,18 @@ export function resolveRoutingChain(modelString: string | undefined): ResolvedCh
   }
 
   const lower = modelString.toLowerCase();
-  if (!lower.startsWith('auto:')) {
+  if (!lower.startsWith('auto:') && !lower.startsWith('auto/') && !lower.startsWith('auto-')) {
     return { chain: activeChainOrThrow(db), strategyKey: 'auto' };
   }
 
-  const suffix = lower.slice('auto:'.length).trim();
+  const suffix = lower.replace(/^auto[:/_-]/, '').trim();
   if (!suffix) {
     return { chain: activeChainOrThrow(db), strategyKey: 'auto' };
+  }
+
+  const WORKLOAD_PROFILES = new Set(['chat', 'coding', 'agentic', 'vision']);
+  if (WORKLOAD_PROFILES.has(suffix)) {
+    return { chain: activeChainOrThrow(db), strategyKey: `auto:${suffix}` };
   }
 
   const globalAxis = GLOBAL_SORT_ALIASES[suffix];

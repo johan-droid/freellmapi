@@ -149,6 +149,7 @@ function createInMemoryMockPool() {
       else if (upper.includes('FROM CLIENT_PROFILES')) tableName = 'client_profiles';
       else if (upper.includes('FROM RATE_LIMIT_COOLDOWNS')) tableName = 'rate_limit_cooldowns';
       else if (upper.includes('FROM RATE_LIMIT_USAGE')) tableName = 'rate_limit_usage';
+      else if (upper.includes('FROM REQUESTS')) tableName = 'requests';
 
       const rows = tables.get(tableName) || [];
 
@@ -195,6 +196,39 @@ function createInMemoryMockPool() {
       if (tableName === 'rate_limit_cooldowns' && upper.includes('WHERE PLATFORM =')) {
         const matched = rows.find(r => r.platform === params[0] && r.model_id === params[1] && Number(r.key_id) === Number(params[2]));
         return { rows: matched ? [matched] : [], rowCount: matched ? 1 : 0 };
+      }
+
+      if (tableName === 'requests' && upper.includes('GROUP BY CLIENT_AGENT')) {
+        const reqs = tables.get('requests') || [];
+        const map = new Map<string, any>();
+        for (const r of reqs) {
+          const key = r.client_agent || 'unknown';
+          if (!map.has(key)) {
+            map.set(key, {
+              client_agent: key,
+              requests: 0,
+              success_count: 0,
+              failure_count: 0,
+              lat_sum: 0,
+            });
+          }
+          const entry = map.get(key)!;
+          entry.requests += 1;
+          if (r.status === 'success') {
+            entry.success_count += 1;
+          } else {
+            entry.failure_count += 1;
+          }
+          entry.lat_sum += (r.latency_ms ?? 0);
+        }
+        const resRows = Array.from(map.values()).map(e => ({
+          client_agent: e.client_agent,
+          requests: e.requests,
+          success_count: e.success_count,
+          failure_count: e.failure_count,
+          avg_latency_ms: e.requests > 0 ? e.lat_sum / e.requests : 0,
+        }));
+        return { rows: resRows, rowCount: resRows.length };
       }
 
       if (tableName === 'requests' && upper.includes('GROUP BY PLATFORM, MODEL_ID')) {
@@ -626,20 +660,50 @@ function createInMemoryMockPool() {
         if (u.includes('INSERT INTO REQUESTS')) {
           const rows = tables.get('requests') || [];
           const isHistorySeed = u.includes('TTFB_MS') && !u.includes('REQUEST_TYPE');
-          const record = {
-            id: idCounter++,
-            platform: args[0],
-            model_id: args[1],
-            key_id: isHistorySeed ? 1 : args[2],
-            status: isHistorySeed ? args[2] : args[3],
-            input_tokens: 0,
-            output_tokens: isHistorySeed ? args[3] : 0,
-            latency_ms: isHistorySeed ? args[4] : args[4],
-            error: isHistorySeed ? args[5] : args[5],
-            ttfb_ms: isHistorySeed ? args[6] : null,
-            request_type: isHistorySeed ? 'chat' : (args[6] ?? 'chat'),
-            created_at: isHistorySeed ? new Date(Date.now() - 2 * 3600 * 1000).toISOString() : new Date().toISOString(),
-          };
+          let record: any;
+          if (u.includes('CLIENT_AGENT')) {
+            record = {
+              id: idCounter++,
+              platform: args[0],
+              model_id: args[1],
+              status: args[2],
+              input_tokens: args[3],
+              output_tokens: args[4],
+              latency_ms: args[5],
+              client_agent: args[6],
+              created_at: new Date().toISOString(),
+            };
+          } else if (isHistorySeed) {
+            record = {
+              id: idCounter++,
+              platform: args[0],
+              model_id: args[1],
+              key_id: 1,
+              status: args[2],
+              input_tokens: 0,
+              output_tokens: args[3],
+              latency_ms: args[4],
+              error: args[5],
+              ttfb_ms: args[6],
+              request_type: 'chat',
+              created_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+            };
+          } else {
+            record = {
+              id: idCounter++,
+              platform: args[0],
+              model_id: args[1],
+              key_id: args[2],
+              status: args[3],
+              input_tokens: 0,
+              output_tokens: 0,
+              latency_ms: args[4],
+              error: args[5],
+              ttfb_ms: null,
+              request_type: args[6] ?? 'chat',
+              created_at: new Date().toISOString(),
+            };
+          }
           rows.push(record);
           tables.set('requests', rows);
           return { changes: 1, lastInsertRowid: record.id };

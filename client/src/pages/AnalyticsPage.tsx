@@ -613,6 +613,18 @@ export default function AnalyticsPage() {
     queryFn: () => apiFetch<ErrorDistribution>(`/api/analytics/error-distribution?range=${range}`),
   })
 
+  const { data: routingTelemetry = [] } = useQuery({
+    queryKey: ['analytics', 'routing-telemetry'],
+    queryFn: () => apiFetch<any[]>('/api/analytics/routing-telemetry'),
+    refetchInterval: 5000,
+  })
+
+  const { data: workloadStats } = useQuery({
+    queryKey: ['analytics', 'workload-stats'],
+    queryFn: () => apiFetch<any>('/api/analytics/workload-stats'),
+    refetchInterval: 5000,
+  })
+
   // Recent-calls list filters (status/platform) + the row opened in the
   // drill-down dialog. Filters ride the query key so react-query refetches
   // (and caches) each combination on its own.
@@ -781,6 +793,85 @@ export default function AnalyticsPage() {
                     <Line type="monotone" dataKey="failureCount" name={t('common.failures')} stroke="var(--destructive)" strokeWidth={1.5} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
+              )}
+            </Panel>
+          </div>
+
+          {/* Workload Share & Agentic Performance Panel */}
+          <div className="lg:col-span-2">
+            <Panel icon={Bot} title="Workload Share & Agentic Performance">
+              {!workloadStats || workloadStats.totalObserved === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Insufficient Data (No workload telemetry recorded yet)</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {Object.entries(workloadStats.byWorkload as Record<string, { total: number; success: number; agenticSuccess: number; fallback: number }>).map(([wl, stats]) => {
+                      const share = workloadStats.totalObserved > 0 ? ((stats.total / workloadStats.totalObserved) * 100).toFixed(1) : '0';
+                      const successRate = stats.total > 0 ? ((stats.success / stats.total) * 100).toFixed(1) : '0';
+                      const isInsufficient = stats.total < 5;
+                      return (
+                        <div key={wl} className="rounded-xl border p-3 bg-card">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold uppercase tracking-wider capitalize">{wl}</span>
+                            {isInsufficient ? (
+                              <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/40">Insufficient Data</Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-[10px]">{share}% Share</Badge>
+                            )}
+                          </div>
+                          <p className="text-lg font-bold mt-1">{stats.total} <span className="text-xs font-normal text-muted-foreground">reqs</span></p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{successRate}% Success</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          {/* Recent Routing Decisions & Explanations Panel */}
+          <div className="lg:col-span-2">
+            <Panel icon={GitBranch} title="Recent Auto Decisions & Deterministic Explanations">
+              {routingTelemetry.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No decisions recorded yet</p>
+              ) : (
+                <div className="max-h-[300px] overflow-x-auto overflow-y-auto -mx-3 sm:-mx-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4">Time</TableHead>
+                        <TableHead>Workload</TableHead>
+                        <TableHead>Routed Model</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead className="pr-4">Explanation</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {routingTelemetry.slice(0, 15).map((t, idx) => (
+                        <TableRow key={t.requestId || idx}>
+                          <TableCell className="pl-4 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                            {formatSqliteUtcToLocalTime(t.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium capitalize">
+                            <Badge variant="outline">{t.workload}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs font-medium">
+                            {t.routedModel} <span className="text-muted-foreground">({t.routedPlatform})</span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <Badge variant={t.selectedReasonCode?.includes('agentic') || t.selectedReasonCode?.includes('coding') ? 'default' : 'secondary'}>
+                              {t.selectedReasonCode}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs max-w-[280px] truncate text-muted-foreground pr-4" title={t.explanation?.winnerReason}>
+                            {t.explanation?.winnerReason || 'Selected highest score candidate.'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </Panel>
           </div>
