@@ -47,24 +47,34 @@ modelsRouter.get('/', async (_req: Request, res: Response) => {
       ORDER BY p.priority DESC, m.priority DESC, m.id ASC
     `);
 
-    const models = queryRes.rows.map((row: any) => ({
-      id: row.id,
-      platform: row.platform,
-      providerName: row.provider_name,
-      modelId: row.model_id,
-      canonicalName: row.canonical_name,
-      displayName: row.display_name,
-      enabled: row.enabled,
-      available: row.available,
-      contextWindow: row.context_window,
-      maxOutputTokens: row.max_output_tokens,
-      supportsStreaming: row.supports_streaming,
-      supportsTools: row.supports_tools,
-      supportsVision: row.supports_vision,
-      supportsStructuredOutput: row.supports_structured_output,
-      supportsReasoning: row.supports_reasoning,
-      priority: row.priority,
-    }));
+    const models = queryRes.rows.map((row: any) => {
+      let executionStatus = 'READY';
+      if (!row.enabled) {
+        executionStatus = 'DISABLED';
+      } else if (!row.available) {
+        executionStatus = 'NEEDS_KEY';
+      }
+
+      return {
+        id: row.id,
+        platform: row.platform,
+        providerName: row.provider_name,
+        modelId: row.model_id,
+        canonicalName: row.canonical_name,
+        displayName: row.display_name,
+        enabled: row.enabled,
+        available: row.available,
+        executionStatus,
+        contextWindow: row.context_window,
+        maxOutputTokens: row.max_output_tokens,
+        supportsStreaming: row.supports_streaming,
+        supportsTools: row.supports_tools,
+        supportsVision: row.supports_vision,
+        supportsStructuredOutput: row.supports_structured_output,
+        supportsReasoning: row.supports_reasoning,
+        priority: row.priority,
+      };
+    });
 
     res.json(models);
   } catch (err: any) {
