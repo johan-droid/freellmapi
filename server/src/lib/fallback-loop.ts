@@ -1316,7 +1316,7 @@ export interface FallbackHooks {
   dispatch(route: RouteResult, attempt: number, ctx: DispatchContext): Promise<DispatchOutcome>;
 
   /** Trace + log a per-attempt failure (per-surface scope + logRequest args). */
-  logFailure(route: RouteResult, err: any, attempt: number): void;
+  logFailure(route: RouteResult, err: any, attempt: number): void | Promise<void>;
 
   /** Render a non-retryable provider error (per-surface body/status). `attempt`
    *  is the failing attempt's index = the number of prior fallback hops. */
@@ -1561,7 +1561,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         const ownedWholeBudget = budgetMs > 0
           && attemptElapsedMs >= budgetMs * HEDGE_BENCH_MIN_SILENT_FRACTION;
         if (ownedWholeBudget) {
-          hooks.logFailure(route, err, attempt);
+          await hooks.logFailure(route, err, attempt);
           await recordRetryableFailure(route, err, hooks.state);
         }
         console.log(`[FallbackLoop] retry time budget expired mid-attempt on ${route.platform}/${route.modelId} after ${(elapsedMs / 1000).toFixed(1)}s — rendering timedOut exhaustion ${ownedWholeBudget ? `and benching the route (silent for the whole ${budgetMs}ms budget)` : 'without benching'}`);
@@ -1572,7 +1572,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         traceAttempt('timeout', err);
         return;
       }
-      hooks.logFailure(route, err, attempt);
+      await hooks.logFailure(route, err, attempt);
       if (isKeyAuthError(err)) {
         // KEY-fatal, not request-fatal: rotate past the bad key and revalidate
         // it immediately instead of 502-ing while healthy routes sit idle.
@@ -1636,7 +1636,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         `expected 'done' or 'committed', got ${JSON.stringify(outcome)}`,
       );
       console.error('[FallbackLoop]', violation.message);
-      hooks.logFailure(route, violation, attempt);
+      await hooks.logFailure(route, violation, attempt);
       traceAttempt('error', violation);
       hooks.onFatal(route, violation, attempt);
       return;

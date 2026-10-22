@@ -770,6 +770,25 @@ keysRouter.post('/', async (req: Request, res: Response) => {
     }
   }
 
+  // Prevent duplicate keys for the same platform
+  if (keyToStore && keyToStore !== 'no-key') {
+    const existingRows = await db.all(
+      'SELECT id, encrypted_key, iv, auth_tag FROM api_keys WHERE platform = ?',
+      [platform],
+    ) as Array<{ id: number; encrypted_key: string; iv: string; auth_tag: string }>;
+    for (const r of existingRows) {
+      try {
+        const decrypted = decrypt(r.encrypted_key, r.iv, r.auth_tag);
+        if (decrypted === keyToStore) {
+          res.status(409).json({ error: { message: `This API key has already been added for ${platform}` } });
+          return;
+        }
+      } catch {
+        // ignore undecryptable rows
+      }
+    }
+  }
+
   const { encrypted, iv, authTag } = encrypt(keyToStore);
   // #590: the proxy URL is encrypted like the key itself — it usually embeds
   // `user:pass@` credentials. Absent/'' stores NULLs = no override.

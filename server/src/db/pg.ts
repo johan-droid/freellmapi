@@ -116,7 +116,14 @@ export function resolveSslConfig(
  * Returns the rewritten SQL and how many placeholders were bound, which the
  * driver cross-checks against the supplied parameter count.
  */
-export function translatePlaceholders(sql: string): { text: string; count: number; named: string[] } {
+export function translatePlaceholders(rawSql: string): { text: string; count: number; named: string[] } {
+  let sql = rawSql;
+  if (/\bGLOB\b/i.test(sql)) {
+    sql = sql.replace(/([a-zA-Z0-9_.]+)\s+NOT\s+GLOB\s+'([^']*)'/gi, (_m, col, pat) => `${col} NOT LIKE '${pat.replace(/\*/g, '%').replace(/\?/g, '_')}'`);
+    sql = sql.replace(/([a-zA-Z0-9_.]+)\s+GLOB\s+'([^']*)'/gi, (_m, col, pat) => `${col} LIKE '${pat.replace(/\*/g, '%').replace(/\?/g, '_')}'`);
+    sql = sql.replace(/([a-zA-Z0-9_.]+)\s+NOT\s+GLOB\s+([a-zA-Z0-9_.]+)/gi, (_m, col, expr) => `${col} NOT LIKE replace(replace(${expr}, '*', '%'), '?', '_')`);
+    sql = sql.replace(/([a-zA-Z0-9_.]+)\s+GLOB\s+([a-zA-Z0-9_.]+)/gi, (_m, col, expr) => `${col} LIKE replace(replace(${expr}, '*', '%'), '?', '_')`);
+  }
   let out = '';
   let param = 0;
   let maxDollar = 0;
@@ -288,6 +295,8 @@ export function createPgPool(connectionString: string): pg.Pool {
   return pool;
 }
 
+let pgTotalChanges = 0;
+
 /**
  * PostgreSQL implementation of the async {@link Db} contract.
  *
@@ -311,6 +320,13 @@ export class PgDb implements Db {
   }
 
   private async runQuery<T>(sql: string, params: readonly unknown[]): Promise<QueryResult<T>> {
+    const trimmed = sql.trim();
+    if (/^SELECT\s+total_changes\(\)\s*(?:AS\s+([a-zA-Z0-9_]+))?\s*;?$/i.test(trimmed)) {
+      const match = /^SELECT\s+total_changes\(\)\s*(?:AS\s+([a-zA-Z0-9_]+))?\s*;?$/i.exec(trimmed);
+      const col = match?.[1] || 'n';
+      return { rows: [{ [col]: pgTotalChanges }] as T[], rowCount: 1 };
+    }
+
     const { text, count, named } = translatePlaceholders(sql);
     let bound: readonly unknown[];
     if (named.length > 0 && params.length === 1 && isPlainObject(params[0])) {
@@ -329,7 +345,15 @@ export class PgDb implements Db {
           `SQL: ${sql.trim().slice(0, 200)}`,
       );
     }
-    const res = await this.executor.query(text, bound as unknown[]);
+    const sanitizedBound = bound.map((val) => {
+      if (typeof val === 'number') {
+        if (Number.isNaN(val) || !Number.isFinite(val)) return 0;
+      } else if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date) && !(val instanceof Buffer)) {
+        return null;
+      }
+      return val;
+    });
+    const res = await this.executor.query(text, sanitizedBound as unknown[]);
     const last = Array.isArray(res) ? res[res.length - 1] : res;
     return { rows: (last?.rows ?? []) as T[], rowCount: last?.rowCount ?? 0 };
   }
@@ -350,10 +374,12 @@ export class PgDb implements Db {
 
   async run(sql: string, params: readonly unknown[] = []): Promise<RunResult> {
     const res = await this.runQuery(sql, params);
+    const changes = res.rowCount ?? 0;
+    pgTotalChanges += changes;
     const first = res.rows[0] as Record<string, unknown> | undefined;
     const generatedId = first && 'id' in first ? (first.id as number | bigint) : undefined;
     return {
-      changes: res.rowCount ?? 0,
+      changes,
       ...(generatedId !== undefined ? { lastInsertRowid: generatedId } : {}),
     };
   }

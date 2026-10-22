@@ -94,6 +94,21 @@ describe('Keys API', () => {
     expect(body.maskedKey).toContain('...');
   });
 
+  it('POST /api/keys rejects duplicate keys for the same platform', async () => {
+    const first = await request(app, 'POST', '/api/keys', {
+      platform: 'groq',
+      key: 'gsk_test123456789',
+    });
+    expect(first.status).toBe(201);
+
+    const second = await request(app, 'POST', '/api/keys', {
+      platform: 'groq',
+      key: 'gsk_test123456789',
+    });
+    expect(second.status).toBe(409);
+    expect(second.body.error.message).toContain('already been added');
+  });
+
   it('GET /api/keys returns the created key', async () => {
     // First create a key
     await request(app, 'POST', '/api/keys', {

@@ -231,9 +231,10 @@ export async function registerCustomEmbeddingModel(db: Db, reg: CustomEmbeddingR
   const bindKeyId = existingModel?.key_id != null && endpointKeyIds.has(existingModel.key_id)
     ? existingModel.key_id
     : reg.keyId;
-  const priority = existingModel?.priority ?? (
-    (await db.get('SELECT COALESCE(MAX(priority), 0) AS maxPriority FROM embedding_models WHERE family = ?', [reg.family]) as { maxPriority: number }).maxPriority + 1
-  );
+  const maxRow = (await db.get('SELECT COALESCE(MAX(priority), 0) AS "maxPriority" FROM embedding_models WHERE family = ?', [reg.family])) as any;
+  const currentMax = Number(maxRow?.maxPriority ?? maxRow?.maxpriority ?? 0);
+  const priority = existingModel?.priority ?? ((Number.isFinite(currentMax) ? currentMax : 0) + 1);
+  const safePriority = Number.isFinite(priority) ? Math.floor(priority) : 1;
 
   // `display_name` is optional: a new model takes its id, and a model already
   // on record keeps the name it has instead of being reset by a submit that
@@ -250,7 +251,7 @@ export async function registerCustomEmbeddingModel(db: Db, reg: CustomEmbeddingR
              quota_label = ?,
              key_id = ?
        WHERE id = ?
-    `, [reg.family, reg.displayName, reg.dimensions, reg.maxInputTokens, priority, reg.quotaLabel, bindKeyId, existingModel.id]);
+    `, [reg.family, reg.displayName, reg.dimensions, reg.maxInputTokens, safePriority, reg.quotaLabel, bindKeyId, existingModel.id]);
     return { modelDbId: existingModel.id, created: false };
   }
 
@@ -258,7 +259,7 @@ export async function registerCustomEmbeddingModel(db: Db, reg: CustomEmbeddingR
     INSERT INTO embedding_models
       (family, platform, model_id, display_name, dimensions, max_input_tokens, priority, enabled, quota_label, key_id)
     VALUES (?, 'custom', ?, ?, ?, ?, ?, 1, ?, ?) RETURNING id
-  `, [reg.family, reg.modelId, reg.displayName ?? reg.modelId, reg.dimensions, reg.maxInputTokens, priority, reg.quotaLabel, bindKeyId]);
+  `, [reg.family, reg.modelId, reg.displayName ?? reg.modelId, reg.dimensions, reg.maxInputTokens, safePriority, reg.quotaLabel, bindKeyId]);
   return { modelDbId: Number(model.lastInsertRowid), created: true };
 }
 

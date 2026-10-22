@@ -80,6 +80,7 @@ function scenario(plan: Attempt[], overrides: Partial<FallbackHooks> = {}) {
         platform: target.platform,
         endpointScope: target.endpointScope ?? '',
         displayName: 'Test model',
+        contextWindow: null,
         rpdLimit: null,
         tpdLimit: null,
         release: vi.fn(() => releaseLease(leaseId)),
@@ -111,7 +112,7 @@ function scenario(plan: Attempt[], overrides: Partial<FallbackHooks> = {}) {
     onRoutingExhausted: vi.fn(),
     ...overrides,
   };
-  return { hooks, routed };
+  return { hooks: hooks as typeof hooks & { onExhausted: ReturnType<typeof vi.fn> }, routed };
 }
 
 async function history(platform: string, ttfbMs: number, endpointScope = ''): Promise<void> {

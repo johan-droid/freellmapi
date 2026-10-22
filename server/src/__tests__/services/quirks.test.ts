@@ -27,11 +27,11 @@ describe('quirks resolution (migrateQuirksV1)', () => {
 
   it('applies a glob quirk only to matching model ids', async () => {
     // or-ultra-hangs targets openrouter '*nemotron-3-ultra*'
-    const ultra = (await getDb().get("SELECT model_id FROM models WHERE platform = 'openrouter' AND model_id GLOB '*nemotron-3-ultra*'")) as { model_id: string } | undefined;
+    const ultra = (await getDb().get("SELECT model_id FROM models WHERE platform = 'openrouter' AND model_id LIKE '%nemotron-3-ultra%'")) as { model_id: string } | undefined;
     if (ultra) expect(await slugsFor('openrouter', ultra.model_id)).toContain('or-ultra-hangs');
 
     // A non-matching openrouter model must NOT pick it up.
-    const other = (await getDb().get("SELECT model_id FROM models WHERE platform = 'openrouter' AND model_id NOT GLOB '*nemotron-3-ultra*'")) as { model_id: string } | undefined;
+    const other = (await getDb().get("SELECT model_id FROM models WHERE platform = 'openrouter' AND model_id NOT LIKE '%nemotron-3-ultra%'")) as { model_id: string } | undefined;
     if (other) expect(await slugsFor('openrouter', other.model_id)).not.toContain('or-ultra-hangs');
   });
 

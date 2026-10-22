@@ -213,17 +213,27 @@ async function recordUsage(
   tokens: number,
   now: number,
 ): Promise<boolean> {
+  const safePlatform = String(platform ?? '');
+  const safeModelId = String(modelId ?? '');
+  const safeKeyId = typeof keyId === 'number' && Number.isFinite(keyId)
+    ? Math.floor(keyId)
+    : (Number.isFinite(Number(keyId)) ? Math.floor(Number(keyId)) : 0);
+  const safeTokens = typeof tokens === 'number' && Number.isFinite(tokens) && tokens >= 0
+    ? Math.floor(tokens)
+    : (Number.isFinite(Number(tokens)) && Number(tokens) >= 0 ? Math.floor(Number(tokens)) : 0);
+  const safeNow = typeof now === 'number' && Number.isFinite(now) ? Math.floor(now) : Date.now();
+
   return await withDb(async db => {
     await db.run(`
       INSERT INTO rate_limit_usage (platform, model_id, key_id, kind, tokens, created_at_ms)
       VALUES (?, ?, ?, ?, ?, ?)
-    `, [platform, modelId, keyId, kind, tokens, now]);
+    `, [safePlatform, safeModelId, safeKeyId, kind, safeTokens, safeNow]);
     // `now < lastUsagePruneMs` covers a clock step backwards (NTP correction,
     // a suspended host resuming) — without it a jump forward would wedge the
     // prune off until real time caught up again.
-    if (now - lastUsagePruneMs >= USAGE_PRUNE_INTERVAL_MS || now < lastUsagePruneMs) {
-      lastUsagePruneMs = now;
-      await db.run('DELETE FROM rate_limit_usage WHERE created_at_ms <= ?', [now - DAY]);
+    if (safeNow - lastUsagePruneMs >= USAGE_PRUNE_INTERVAL_MS || safeNow < lastUsagePruneMs) {
+      lastUsagePruneMs = safeNow;
+      await db.run('DELETE FROM rate_limit_usage WHERE created_at_ms <= ?', [safeNow - DAY]);
     }
     return true;
   }) ?? false;
@@ -828,17 +838,20 @@ export async  function recordRequest(platform: string, modelId: string, keyId: n
   clearCooldownHits(platform, modelId, keyId);
 }
 
-export async  function recordTokens(
+export async function recordTokens(
   platform: string,
   modelId: string,
   keyId: number,
   tokens: number,
 ) {
+  const safeTokens = typeof tokens === 'number' && Number.isFinite(tokens) && tokens >= 0
+    ? Math.floor(tokens)
+    : (Number.isFinite(Number(tokens)) && Number(tokens) >= 0 ? Math.floor(Number(tokens)) : 0);
   const now = Date.now();
 
-  if (!await recordUsage(platform, modelId, keyId, 'tokens', tokens, now)) {
-    pushMemoryTokens(`${platform}:${modelId}:${keyId}:tpm`, MINUTE, now, tokens);
-    pushMemoryTokens(`${platform}:${modelId}:${keyId}:tpd`, DAY, now, tokens);
+  if (!await recordUsage(platform, modelId, keyId, 'tokens', safeTokens, now)) {
+    pushMemoryTokens(`${platform}:${modelId}:${keyId}:tpm`, MINUTE, now, safeTokens);
+    pushMemoryTokens(`${platform}:${modelId}:${keyId}:tpd`, DAY, now, safeTokens);
   }
 }
 

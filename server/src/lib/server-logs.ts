@@ -396,10 +396,11 @@ async function seedNow(): Promise<void> {
 
   try {
     const pending = ring.splice(0, ring.length);
-    const max = await db.get('SELECT MAX(id) AS maxId FROM server_logs') as
+    const max = await db.get('SELECT MAX(id) AS "maxId" FROM server_logs') as
       | { maxId: number | null }
       | undefined;
-    lastId = Math.max(lastId, max?.maxId ?? 0);
+    const resolvedMax = Number(max?.maxId ?? (max as any)?.maxid ?? 0);
+    lastId = Math.max(lastId, Number.isFinite(resolvedMax) ? resolvedMax : 0);
 
     const rows = await db.all(`
       SELECT id, level, source, provider, model, event, request_id, message, created_at_ms

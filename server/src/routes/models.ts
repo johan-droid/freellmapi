@@ -143,9 +143,9 @@ modelsRouter.post('/', async (req: Request, res: Response) => {
   const insertModel = await db.transaction(async (tx) => {
     // Clear any tombstone so manual re-creation brings the model back into active state
     if (data.platform === 'custom') {
-      await clearCustomModelTombstone(db, endpointScope, data.modelId);
+      await clearCustomModelTombstone(tx, endpointScope, data.modelId);
     } else {
-      await clearCatalogModelTombstone(db, 'chat', data.platform, data.modelId);
+      await clearCatalogModelTombstone(tx, 'chat', data.platform, data.modelId);
     }
 
     const info = await tx.run(`
@@ -167,7 +167,7 @@ modelsRouter.post('/', async (req: Request, res: Response) => {
       const max = await tx.get('SELECT COALESCE(MAX(priority), 0) AS m FROM fallback_config') as { m: number };
       await tx.run('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)', [modelDbId, max.m + 1]);
     }
-    await ensureModelInProfiles(db, modelDbId);
+    await ensureModelInProfiles(tx, modelDbId);
 
     return modelDbId;
   });
@@ -218,7 +218,7 @@ modelsRouter.delete('/custom/:id', async (req: Request, res: Response) => {
     await tx.run('DELETE FROM fallback_config WHERE model_db_id = ?', [id]);
     await tx.run('DELETE FROM profile_models WHERE model_db_id = ?', [id]);
     await tx.run("DELETE FROM models WHERE id = ? AND platform = 'custom'", [id]);
-    await deleteUnusedCustomEndpointKey(db, row.key_id);
+    await deleteUnusedCustomEndpointKey(tx, row.key_id);
     await pruneUnavailableSavedFusionConfig();
   });
   res.json({ success: true });
@@ -331,7 +331,7 @@ modelsRouter.delete('/:id', async (req: Request, res: Response) => {
     await tx.run('DELETE FROM fallback_config WHERE model_db_id = ?', [id]);
     await tx.run('DELETE FROM profile_models WHERE model_db_id = ?', [id]);
     await tx.run('DELETE FROM models WHERE id = ?', [id]);
-    if (row.platform === 'custom') await deleteUnusedCustomEndpointKey(db, row.key_id);
+    if (row.platform === 'custom') await deleteUnusedCustomEndpointKey(tx, row.key_id);
     await pruneUnavailableSavedFusionConfig();
   });
 

@@ -217,7 +217,7 @@ embeddingsRouter.delete('/custom/:id', async (req: Request, res: Response) => {
 
   await db.transaction(async (tx) => {
     await tx.run("DELETE FROM embedding_models WHERE id = ? AND platform = 'custom'", [id]);
-    await deleteUnusedCustomEndpointKey(db, row.key_id);
+    await deleteUnusedCustomEndpointKey(tx, row.key_id);
   });
   if (await getDefaultFamily() === row.family) {
     const replacement = await db.get('SELECT family FROM embedding_models ORDER BY family, priority LIMIT 1') as { family: string } | undefined;

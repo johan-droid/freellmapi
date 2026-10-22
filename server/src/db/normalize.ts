@@ -25,6 +25,7 @@ export async function normalizeLegacySchema(db: Db): Promise<void> {
     await normalizeLegacyClientProfilesTable(db);
     await normalizeLegacyPlaygroundConversationsTable(db);
     await normalizeLegacyProviderQuotaTable(db);
+    await normalizeFallbackConfigCascade(db);
     await recoverLegacyCredentials(db);
   } catch (err: any) {
     console.warn(`[db] note: legacy schema normalization check: ${err?.message ?? err}`);
@@ -709,6 +710,29 @@ async function recoverLegacyCredentials(db: Db): Promise<void> {
   const countAfter = await db.get<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM api_keys').catch(() => null);
   if (countBefore && countAfter && Number(countAfter.cnt) > Number(countBefore.cnt)) {
     console.log(`[db] recovered ${Number(countAfter.cnt) - Number(countBefore.cnt)} legacy credentials into api_keys`);
+  }
+}
+
+async function normalizeFallbackConfigCascade(db: Db): Promise<void> {
+  try {
+    await db.exec(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+           WHERE constraint_name = 'fallback_config_model_db_id_fkey'
+             AND table_name = 'fallback_config'
+        ) THEN
+          ALTER TABLE fallback_config DROP CONSTRAINT fallback_config_model_db_id_fkey;
+          ALTER TABLE fallback_config ADD CONSTRAINT fallback_config_model_db_id_fkey
+            FOREIGN KEY (model_db_id) REFERENCES models(id) ON DELETE CASCADE;
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        NULL;
+      END $$;
+    `);
+  } catch {
+    // Non-fatal if table doesn't exist yet
   }
 }
 

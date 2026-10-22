@@ -198,7 +198,7 @@ mediaRouter.delete('/custom/:id', async (req: Request, res: Response) => {
   }
   await db.transaction(async (tx) => {
     await tx.run("DELETE FROM media_models WHERE id = ? AND platform = 'custom'", [id]);
-    await deleteUnusedCustomEndpointKey(db, row.key_id);
+    await deleteUnusedCustomEndpointKey(tx, row.key_id);
   });
   res.json({ success: true });
 });

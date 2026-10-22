@@ -26,14 +26,14 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('dashboard quota outlook', () => {
   it('uses the existing rate projection and warns below 20% without changing the API threshold', async () => {
-    await signal(); traffic(7);
+    await signal(); await traffic(7);
     const pool = (await getQuotaOutlook()).pools[0];
     expect(pool).toMatchObject({remaining:35,remainingPct:14,ratePerMin:0.7,status:'forecast',warning:'low_balance',estimatedExhaustionAt:'2026-09-14T20:50:00.000Z'});
     expect(await await (await getQuotaForecast(await getQuotaStateForKeys({ normalizeExpired: false }), NOW))[0].low_balance).toBe(false);
   });
 
   it('warns at two hours even above 20%, but not when reset wins', async () => {
-    await signal({remaining:75}); traffic(10);
+    await signal({remaining:75}); await traffic(10);
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'forecast',warning:'exhausting_soon'});
     (await getDb().run("UPDATE provider_quota_state SET reset_at='2026-09-14T20:30:00Z'"));
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'resets_first',warning:null,estimatedExhaustionAt:null});
@@ -42,14 +42,14 @@ describe('dashboard quota outlook', () => {
   it('keeps the 20% boundary strict and the two-hour boundary inclusive', async () => {
     await signal({remaining:50});
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'insufficient_data',warning:null});
-    (await getDb().run('UPDATE provider_quota_state SET remaining_value=120')); traffic(10);
+    (await getDb().run('UPDATE provider_quota_state SET remaining_value=120')); await traffic(10);
     expect((await getQuotaOutlook()).pools[0].warning).toBe('exhausting_soon');
     (await getDb().run('UPDATE provider_quota_state SET remaining_value=121'));
     expect((await getQuotaOutlook()).pools[0].warning).toBeNull();
   });
 
   it('distinguishes sparse traffic from an exhausted current window', async () => {
-    await signal({remaining:100}); traffic(2);
+    await signal({remaining:100}); await traffic(2);
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'insufficient_data',ratePerMin:0.2,recentRequestCount:2,warning:null});
     (await getDb().run('UPDATE provider_quota_state SET remaining_value=0'));
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'exhausted',warning:'low_balance',estimatedExhaustionAt:null});
@@ -60,7 +60,7 @@ describe('dashboard quota outlook', () => {
     {observed:'2026-09-14 19:40:00'}, {observed:'2026-09-14 20:10:00'},
     {observed:'invalid'}, {confidence:0.1},
   ])('does not turn unusable observations into current forecasts: %j', async overrides => {
-    await signal(overrides); traffic(10);
+    await signal(overrides); await traffic(10);
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({warning:null,ratePerMin:1,recentRequestCount:10,estimatedExhaustionAt:null});
     expect((await getQuotaOutlook()).pools[0].unavailableReason).not.toBeNull();
   });
@@ -73,7 +73,7 @@ describe('dashboard quota outlook', () => {
 
   it('preserves forecast tie-breaking and counts the shared pool once', async () => {
     await signal({key:1,limit:1000,remaining:144}); await signal({key:2,limit:1000,remaining:141});
-    traffic(5,1); traffic(5,2);
+    await traffic(5,1); await traffic(5,2);
     const {pools} = await getQuotaOutlook();
     expect(pools).toHaveLength(1);
     expect(pools[0]).toMatchObject({remaining:144,ratePerMin:1,estimatedExhaustionAt:'2026-09-14T22:24:00.000Z'});
@@ -98,19 +98,19 @@ describe('dashboard quota outlook', () => {
 
 
 it('records usage independently for a provider with no quota readings or request limits', async () => {
-  traffic(2,1,'kilo','free-model');
+  await traffic(2,1,'kilo','free-model');
   expect(await getQuotaOutlook()).toMatchObject({observationWindowMinutes:10,minimumRequests:3,pools:[{
     platform:'kilo',recentRequestCount:2,ratePerMin:0.2,remaining:null,limit:null,
     estimatedExhaustionAt:null,status:'unknown',unavailableReason:'quota_not_reported',
   }]});
-  traffic(8,1,'kilo','another-model');
+  await traffic(8,1,'kilo','another-model');
   expect((await getQuotaOutlook()).pools).toHaveLength(1);
   expect((await getQuotaOutlook()).pools[0]).toMatchObject({recentRequestCount:10,ratePerMin:1,estimatedExhaustionAt:null});
 });
 
 it('prefers a current observation over an exhausted stale legacy key and counts each request once', async () => {
   await signal({key:0,remaining:0,observed:'2026-07-30 10:00:00'});
-  await signal({key:1,remaining:100});traffic(10);
+  await signal({key:1,remaining:100}); await traffic(10);
   expect((await getQuotaOutlook()).pools).toHaveLength(1);
   expect((await getQuotaOutlook()).pools[0]).toMatchObject({remaining:100,ratePerMin:1,status:'forecast'});
 });
@@ -120,7 +120,7 @@ it('forecasts from real Groq duration headers and retains freshness after an emp
   try {
     await recordQuotaObservationsFromResponse(new Response(null,{headers:{
       'x-ratelimit-limit-requests':'100','x-ratelimit-remaining-requests':'10','x-ratelimit-reset-requests':'1h30m',
-    }}),{platform:'groq',keyId:1});traffic(10);
+    }}),{platform:'groq',keyId:1}); await traffic(10);
     expect((await getQuotaOutlook()).pools[0]).toMatchObject({status:'forecast',warning:'low_balance',ratePerMin:1,estimatedExhaustionAt:'2026-09-14T20:10:00.000Z'});
     vi.setSystemTime(NOW+11*60000);
     await recordQuotaObservation({platform:'groq',keyId:1,source:'probe',confidence:0.1});
@@ -145,6 +145,6 @@ it('includes keyless successful usage but excludes failed, old and future traffi
 
 
 it('normalizes SQLite UTC reset timestamps before projecting exhaustion', async () => {
-  await signal({remaining:100,reset:'2026-09-14 20:30:00'});traffic(10);
+  await signal({remaining:100,reset:'2026-09-14 20:30:00'}); await traffic(10);
   expect((await getQuotaOutlook()).pools[0]).toMatchObject({resetAt:'2026-09-14T20:30:00.000Z',status:'resets_first',estimatedExhaustionAt:null});
 });

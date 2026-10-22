@@ -206,12 +206,13 @@ export const QUOTA_POLL_INTERVAL_MS = 15 * 60 * 1000;
 
 async function quotaPollDue(keyId: number, now = Date.now()): Promise<boolean> {
   const row = await getDb().get(`
-    SELECT created_at AS seenAt FROM provider_quota_observations
+    SELECT created_at AS "seenAt" FROM provider_quota_observations
      WHERE key_id = ? AND source = 'quota_api'
      ORDER BY created_at DESC LIMIT 1
-  `, [keyId]) as { seenAt: string | null } | undefined;
-  if (!row?.seenAt) return true;
-  const seen = Date.parse(row.seenAt.includes('T') ? row.seenAt : row.seenAt.replace(' ', 'T') + 'Z');
+  `, [keyId]) as { seenAt?: string | null; seenat?: string | null } | undefined;
+  const rawSeen = row?.seenAt ?? row?.seenat;
+  if (!rawSeen) return true;
+  const seen = Date.parse(rawSeen.includes('T') ? rawSeen : rawSeen.replace(' ', 'T') + 'Z');
   if (!Number.isFinite(seen)) return true;
   return now - seen >= QUOTA_POLL_INTERVAL_MS;
 }

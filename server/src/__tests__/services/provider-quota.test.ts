@@ -26,11 +26,13 @@ async function insertState(row: {
 }
 
 async function readState(platform: string, keyId: number, pool: string, metric: string) {
-  return (await getDb().get(`
-    SELECT limit_value AS lim, remaining_value AS remaining, reset_at AS resetAt
+  const row = (await getDb().get(`
+    SELECT limit_value AS lim, remaining_value AS remaining, reset_at AS "resetAt"
       FROM provider_quota_state
      WHERE platform = ? AND key_id = ? AND quota_pool_key = ? AND metric = ?
-  `, [platform, keyId, pool, metric])) as { lim: number | null; remaining: number | null; resetAt: string | null } | undefined;
+  `, [platform, keyId, pool, metric])) as { lim: number | null; remaining: number | null; resetAt?: string | null; resetat?: string | null } | undefined;
+  if (!row) return undefined;
+  return { lim: row.lim, remaining: row.remaining, resetAt: row.resetAt ?? row.resetat ?? null };
 }
 
 describe('provider-quota: pool inference', () => {

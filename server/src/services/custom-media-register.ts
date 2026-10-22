@@ -50,9 +50,12 @@ export async function registerCustomMediaModel(
   const bindKeyId = existingModel?.key_id != null && endpointKeyIds.has(existingModel.key_id)
     ? existingModel.key_id
     : keyId;
+  const maxRow = (await db.get('SELECT COALESCE(MAX(priority), 0) AS "maxPriority" FROM media_models WHERE modality = ?', [entry.modality])) as any;
+  const currentMax = Number(maxRow?.maxPriority ?? maxRow?.maxpriority ?? 0);
   const priority = existingModel && existingModel.modality === entry.modality
     ? existingModel.priority
-    : (await db.get('SELECT COALESCE(MAX(priority), 0) AS maxPriority FROM media_models WHERE modality = ?', [entry.modality]) as { maxPriority: number }).maxPriority + 1;
+    : (Number.isFinite(currentMax) ? currentMax : 0) + 1;
+  const safePriority = Number.isFinite(priority) ? Math.floor(priority) : 1;
 
   if (existingModel) {
     await db.run(`
@@ -64,7 +67,7 @@ export async function registerCustomMediaModel(
              quota_label = ?,
              key_id = ?
        WHERE id = ?
-    `, [entry.displayName, entry.modality, priority, quotaLabel, bindKeyId, existingModel.id]);
+    `, [entry.displayName, entry.modality, safePriority, quotaLabel, bindKeyId, existingModel.id]);
     return { modelDbId: existingModel.id, model: modelId, modality: entry.modality, created: false };
   }
 
@@ -72,6 +75,6 @@ export async function registerCustomMediaModel(
     INSERT INTO media_models
       (platform, model_id, display_name, modality, priority, enabled, quota_label, key_id)
     VALUES ('custom', ?, ?, ?, ?, 1, ?, ?) RETURNING id
-  `, [modelId, entry.displayName ?? modelId, entry.modality, priority, quotaLabel, bindKeyId]);
+  `, [modelId, entry.displayName ?? modelId, entry.modality, safePriority, quotaLabel, bindKeyId]);
   return { modelDbId: Number(model.lastInsertRowid), model: modelId, modality: entry.modality, created: true };
 }
