@@ -3,8 +3,10 @@ import type { Db } from '../types.js';
 
 import { initEncryptionKey } from '../../lib/crypto.js';
 import { applyModelPricing } from '../model-pricing.js';
+import { normalizeLegacyBooleanColumns } from '../normalize.js';
 
 export async function up(db: Db): Promise<void> {
+  await normalizeLegacyBooleanColumns(db);
   await createTables(db);
   await initEncryptionKey(db);
   await seedModels(db);

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { runMigrations } from './migrate/runner.js';
+import { normalizeLegacyBooleanColumns } from './normalize.js';
 import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { createPgPool, PgDb } from './pg.js';
 import type { Db } from './types.js';
@@ -65,6 +66,7 @@ export async function connectDb(connectionString?: string): Promise<Db> {
  */
 export async function initDb(connectionString?: string): Promise<Db> {
   const conn = await connectDb(connectionString);
+  await normalizeLegacyBooleanColumns(conn);
 
   if (process.env.NODE_ENV !== 'development') {
     await runMigrations(conn, 'up');

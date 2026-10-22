@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import type { Db } from '../types.js';
+import { normalizeLegacyBooleanColumns } from '../normalize.js';
 import { DEFAULT_MIGRATIONS, type MigrationModule } from './defaults.js';
 
 export type MigrationDirection = 'up' | 'down';
@@ -50,6 +51,9 @@ export async function runMigrations(
   options: MigrationRunnerOptions = {},
 ): Promise<void> {
   await ensureMigrationsTable(db);
+  if (direction === 'up') {
+    await normalizeLegacyBooleanColumns(db);
+  }
   const records = getMigrationRecords(options);
 
   if (direction === 'up') {
@@ -98,10 +102,12 @@ async function runPendingMigrations(
     // bookkeeping row commit (or roll back) together. The migration receives the
     // transaction-bound `tx`, so every statement it issues shares that single
     // connection and joins the same transaction.
+    console.log(`[db] running migration: ${record.filename}`);
     await db.transaction(async (tx) => {
       await migration.up(tx);
       await tx.run('INSERT INTO migrations (filename) VALUES (?)', [record.filename]);
     });
+    console.log(`[db] applied migration: ${record.filename}`);
     applied.set(record.filename, new Date().toISOString());
   }
 }
