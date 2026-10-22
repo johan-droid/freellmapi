@@ -114,4 +114,101 @@ describe('normalizeLegacyBooleanColumns', () => {
       await cleanup();
     }
   });
+
+  it('normalizes legacy fork schema with provider_id, canonical_name, and recovers credentials', async () => {
+    const { db, cleanup } = await createEmptyTestDb();
+
+    try {
+      // Recreate the exact schema that existed in the fork deployment on Render
+      await db.exec(`
+        CREATE TABLE providers (
+          id SERIAL PRIMARY KEY,
+          provider_key VARCHAR(64) UNIQUE NOT NULL,
+          display_name VARCHAR(128) NOT NULL,
+          base_url TEXT,
+          enabled BOOLEAN NOT NULL DEFAULT true
+        );
+
+        CREATE TABLE credentials (
+          id SERIAL PRIMARY KEY,
+          provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+          credential_name VARCHAR(128) NOT NULL DEFAULT '',
+          encrypted_value TEXT NOT NULL,
+          iv VARCHAR(64) NOT NULL,
+          auth_tag VARCHAR(64) NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE models (
+          id SERIAL PRIMARY KEY,
+          provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+          model_id VARCHAR(128) NOT NULL,
+          canonical_name VARCHAR(128) NOT NULL,
+          display_name VARCHAR(128) NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT true,
+          context_window INTEGER,
+          max_output_tokens INTEGER,
+          supports_streaming BOOLEAN NOT NULL DEFAULT true,
+          supports_tools BOOLEAN NOT NULL DEFAULT false,
+          supports_vision BOOLEAN NOT NULL DEFAULT false,
+          supports_structured_output BOOLEAN NOT NULL DEFAULT false,
+          supports_reasoning BOOLEAN NOT NULL DEFAULT false,
+          platform VARCHAR(64),
+          CONSTRAINT uq_provider_model UNIQUE (provider_id, model_id)
+        );
+
+        CREATE TABLE client_profiles (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(128) NOT NULL,
+          api_key VARCHAR(128) UNIQUE NOT NULL,
+          system_prompt TEXT,
+          enabled BOOLEAN NOT NULL DEFAULT true
+        );
+
+        INSERT INTO providers (provider_key, display_name) VALUES ('google', 'Google');
+        INSERT INTO credentials (provider_id, credential_name, encrypted_value, iv, auth_tag, enabled)
+        VALUES (1, 'My Google Key', 'enc_val_123', 'iv_123', 'tag_123', true);
+
+        INSERT INTO models (provider_id, platform, model_id, canonical_name, display_name)
+        VALUES (1, 'google', 'gemini-2.5-flash', 'gemini-2.5-flash', 'Gemini 2.5 Flash');
+      `);
+
+      // Running up migrations MUST succeed without violating provider_id not-null constraint
+      await runMigrations(db, 'up');
+
+      // Verify models table no longer has provider_id or canonical_name
+      const modelCols = await db.all<{ column_name: string; data_type: string }>(`
+        SELECT column_name, data_type
+          FROM information_schema.columns
+         WHERE table_name = 'models'
+      `);
+      const colNames = new Set(modelCols.map(c => c.column_name));
+      expect(colNames.has('provider_id')).toBe(false);
+      expect(colNames.has('canonical_name')).toBe(false);
+      expect(colNames.has('platform')).toBe(true);
+
+      // Verify models were seeded/migrated cleanly
+      const models = await db.all<{ model_id: string; platform: string }>('SELECT model_id, platform FROM models');
+      expect(models.length).toBeGreaterThan(10);
+      expect(models.some(m => m.platform === 'google' && m.model_id === 'gemini-2.5-flash')).toBe(true);
+      expect(models.some(m => m.platform === 'cerebras')).toBe(true);
+
+      // Verify client_profiles table was normalized or created with token_hash
+      const cpCols = await db.all<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_name = 'client_profiles'
+      `);
+      const cpNames = new Set(cpCols.map(c => c.column_name));
+      expect(cpNames.has('token_hash')).toBe(true);
+
+      // Verify legacy credentials were recovered into api_keys
+      const recoveredKeys = await db.all<{ platform: string; encrypted_key: string }>('SELECT platform, encrypted_key FROM api_keys');
+      expect(recoveredKeys.some(k => k.platform === 'google' && k.encrypted_key === 'enc_val_123')).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
 });
+

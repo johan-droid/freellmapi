@@ -8,6 +8,7 @@ import { normalizeLegacyBooleanColumns } from '../normalize.js';
 export async function up(db: Db): Promise<void> {
   await normalizeLegacyBooleanColumns(db);
   await createTables(db);
+  await normalizeLegacyBooleanColumns(db);
   await initEncryptionKey(db);
   await seedModels(db);
   await migrateModels(db);
@@ -355,16 +356,25 @@ async function seedModels(db: Db): Promise<void> {
     }
   });
 
-  // Seed default fallback config from models
-  const allModels = await db.all('SELECT id, intelligence_rank FROM models ORDER BY intelligence_rank ASC') as { id: number; intelligence_rank: number }[];
-  const insertFallback = 'INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)';
-  await db.transaction(async (tx) => {
-    for (let i = 0; i < allModels.length; i++) {
-      await tx.run(insertFallback, [allModels[i].id, i + 1]);
-    }
-  });
+  // Seed default fallback config for any models missing from fallback_config
+  const missing = await db.all(`
+    SELECT m.id, m.intelligence_rank
+      FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+     WHERE f.id IS NULL
+     ORDER BY m.intelligence_rank ASC
+  `) as { id: number; intelligence_rank: number }[];
+  if (missing.length > 0) {
+    const maxPriority = (await db.get('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config') as { mx: number }).mx;
+    const insertFallback = 'INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1) ON CONFLICT DO NOTHING';
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < missing.length; i++) {
+        await tx.run(insertFallback, [missing[i].id, maxPriority + i + 1]);
+      }
+    });
+  }
 
-  console.log(`Seeded ${models.length} models and fallback config`);
+  console.log(`Seeded models and fallback config`);
 }
 
 /**
