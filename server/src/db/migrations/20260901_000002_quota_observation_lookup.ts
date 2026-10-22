@@ -24,6 +24,19 @@ import type { Db } from '../types.js';
 
 export async function up(db: Db): Promise<void> {
   await db.exec(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'provider_quota_observations'
+           AND column_name = 'created_at'
+      ) THEN
+        ALTER TABLE provider_quota_observations
+          ADD COLUMN created_at TEXT NOT NULL DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'));
+      END IF;
+    END $$;
+
     CREATE INDEX IF NOT EXISTS idx_provider_quota_observations_latest
       ON provider_quota_observations(platform, key_id, quota_pool_key, metric, observed_at DESC, created_at DESC);
 

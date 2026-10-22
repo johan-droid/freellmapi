@@ -24,6 +24,7 @@ export async function normalizeLegacySchema(db: Db): Promise<void> {
     await normalizeLegacyModelsTable(db);
     await normalizeLegacyClientProfilesTable(db);
     await normalizeLegacyPlaygroundConversationsTable(db);
+    await normalizeLegacyProviderQuotaTable(db);
     await recoverLegacyCredentials(db);
   } catch (err: any) {
     console.warn(`[db] note: legacy schema normalization check: ${err?.message ?? err}`);
@@ -482,6 +483,145 @@ async function normalizeLegacyPlaygroundConversationsTable(db: Db): Promise<void
           DROP COLUMN IF EXISTS updated_at;
       `);
     }
+  }
+}
+
+async function normalizeLegacyProviderQuotaTable(db: Db): Promise<void> {
+  const tableExists = await db.get<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+       WHERE table_schema = current_schema()
+         AND table_name = 'provider_quota_observations'
+    ) AS exists
+  `);
+  if (!tableExists?.exists) return;
+
+  const cols = await db.all<{ column_name: string; data_type: string }>(`
+    SELECT column_name, data_type
+      FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = 'provider_quota_observations'
+  `);
+  const colMap = new Map(cols.map(c => [c.column_name, c.data_type]));
+
+  if (!colMap.has('created_at') || !colMap.has('raw_json') || !colMap.has('endpoint') || colMap.get('observed_at') !== 'text') {
+    console.log('[db] normalizing legacy provider_quota_observations table');
+
+    await db.exec(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_observations'
+             AND column_name = 'raw_json'
+        ) THEN
+          ALTER TABLE provider_quota_observations ADD COLUMN raw_json TEXT;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_observations'
+             AND column_name = 'endpoint'
+        ) THEN
+          ALTER TABLE provider_quota_observations ADD COLUMN endpoint TEXT;
+        END IF;
+
+        ALTER TABLE provider_quota_observations
+          ALTER COLUMN limit_value TYPE DOUBLE PRECISION,
+          ALTER COLUMN remaining_value TYPE DOUBLE PRECISION;
+
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_observations'
+             AND column_name = 'observed_at'
+             AND data_type != 'text'
+        ) THEN
+          ALTER TABLE provider_quota_observations
+            ALTER COLUMN observed_at DROP DEFAULT,
+            ALTER COLUMN observed_at TYPE TEXT USING to_char(observed_at at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+            ALTER COLUMN observed_at SET DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'));
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_observations'
+             AND column_name = 'created_at'
+        ) THEN
+          ALTER TABLE provider_quota_observations
+            ADD COLUMN created_at TEXT DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'));
+
+          UPDATE provider_quota_observations
+             SET created_at = observed_at
+           WHERE created_at IS NULL AND observed_at IS NOT NULL;
+
+          UPDATE provider_quota_observations
+             SET created_at = to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS')
+           WHERE created_at IS NULL;
+
+          ALTER TABLE provider_quota_observations
+            ALTER COLUMN created_at SET NOT NULL;
+        END IF;
+      END $$;
+    `);
+  }
+
+  const stateExists = await db.get<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+       WHERE table_schema = current_schema()
+         AND table_name = 'provider_quota_state'
+    ) AS exists
+  `);
+  if (!stateExists?.exists) return;
+
+  const stateCols = await db.all<{ column_name: string; data_type: string }>(`
+    SELECT column_name, data_type
+      FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = 'provider_quota_state'
+  `);
+  const stateColMap = new Map(stateCols.map(c => [c.column_name, c.data_type]));
+
+  if (stateColMap.get('observed_at') !== 'text' || stateColMap.get('updated_at') !== 'text') {
+    console.log('[db] normalizing legacy provider_quota_state timestamps to TEXT');
+    await db.exec(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_state'
+             AND column_name = 'observed_at'
+             AND data_type != 'text'
+        ) THEN
+          ALTER TABLE provider_quota_state
+            ALTER COLUMN observed_at DROP DEFAULT,
+            ALTER COLUMN observed_at TYPE TEXT USING to_char(observed_at at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+            ALTER COLUMN observed_at SET DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'));
+        END IF;
+
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = 'provider_quota_state'
+             AND column_name = 'updated_at'
+             AND data_type != 'text'
+        ) THEN
+          ALTER TABLE provider_quota_state
+            ALTER COLUMN updated_at DROP DEFAULT,
+            ALTER COLUMN updated_at TYPE TEXT USING to_char(updated_at at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+            ALTER COLUMN updated_at SET DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS'));
+        END IF;
+
+        ALTER TABLE provider_quota_state
+          ALTER COLUMN limit_value TYPE DOUBLE PRECISION,
+          ALTER COLUMN remaining_value TYPE DOUBLE PRECISION;
+      END $$;
+    `);
   }
 }
 

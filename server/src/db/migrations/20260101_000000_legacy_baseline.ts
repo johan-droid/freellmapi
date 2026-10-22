@@ -240,6 +240,9 @@ async function ensureQuotaNumericTypes(db: Db): Promise<void> {
       ALTER COLUMN limit_value TYPE DOUBLE PRECISION,
       ALTER COLUMN remaining_value TYPE DOUBLE PRECISION;
     ALTER TABLE provider_quota_observations
+      ADD COLUMN IF NOT EXISTS raw_json TEXT,
+      ADD COLUMN IF NOT EXISTS endpoint TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TEXT NOT NULL DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS')),
       ALTER COLUMN limit_value TYPE DOUBLE PRECISION,
       ALTER COLUMN remaining_value TYPE DOUBLE PRECISION;
   `);

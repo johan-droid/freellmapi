@@ -402,6 +402,129 @@ describe('normalizeLegacyBooleanColumns', () => {
       await cleanup();
     }
   });
+
+  it('normalizes legacy provider_quota_observations schema and preserves existing data', async () => {
+    const { db, cleanup } = await createEmptyTestDb();
+
+    try {
+      // 1. Create legacy table simulating fork 006_compat_tables schema
+      await db.exec(`
+        CREATE TABLE provider_quota_observations (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          key_id INTEGER NOT NULL,
+          provider_account_id TEXT,
+          model_id TEXT,
+          quota_pool_key TEXT NOT NULL,
+          metric TEXT NOT NULL,
+          status_code INTEGER,
+          limit_value INTEGER,
+          remaining_value INTEGER,
+          reset_at TEXT,
+          retry_after_ms INTEGER,
+          reset_strategy TEXT NOT NULL DEFAULT 'unknown',
+          source TEXT NOT NULL DEFAULT 'probe',
+          confidence REAL NOT NULL DEFAULT 0,
+          notes TEXT,
+          observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX idx_provider_quota_observations_latest
+          ON provider_quota_observations(platform, key_id, quota_pool_key, metric, observed_at DESC);
+
+        CREATE TABLE provider_quota_state (
+          platform TEXT NOT NULL,
+          key_id INTEGER NOT NULL,
+          quota_pool_key TEXT NOT NULL,
+          metric TEXT NOT NULL,
+          limit_value INTEGER,
+          remaining_value INTEGER,
+          reset_at TEXT,
+          reset_strategy TEXT NOT NULL DEFAULT 'unknown',
+          source TEXT NOT NULL DEFAULT 'probe',
+          confidence REAL NOT NULL DEFAULT 0,
+          notes TEXT,
+          observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (platform, key_id, quota_pool_key, metric)
+        );
+
+        INSERT INTO provider_quota_observations (
+          id, platform, key_id, quota_pool_key, metric, limit_value, remaining_value, observed_at
+        ) VALUES (
+          'obs-legacy-1', 'groq', 1, 'groq-pool', 'requests', 30, 25, NOW() - interval '5 minutes'
+        );
+
+        INSERT INTO provider_quota_state (
+          platform, key_id, quota_pool_key, metric, limit_value, remaining_value, observed_at, updated_at
+        ) VALUES (
+          'groq', 1, 'groq-pool', 'requests', 30, 25, NOW() - interval '5 minutes', NOW() - interval '5 minutes'
+        );
+      `);
+
+      // 2. Run all migrations up (including 20260901_000002_quota_observation_lookup.ts)
+      await runMigrations(db, 'up');
+
+      // 3. Verify columns exist on provider_quota_observations
+      const cols = await db.all<{ column_name: string; data_type: string }>(`
+        SELECT column_name, data_type
+          FROM information_schema.columns
+         WHERE table_name = 'provider_quota_observations'
+      `);
+      const colMap = new Map(cols.map(c => [c.column_name, c.data_type]));
+
+      expect(colMap.has('created_at')).toBe(true);
+      expect(colMap.get('created_at')).toBe('text');
+      expect(colMap.has('raw_json')).toBe(true);
+      expect(colMap.has('endpoint')).toBe(true);
+      expect(colMap.get('observed_at')).toBe('text');
+      expect(colMap.get('limit_value')).toBe('double precision');
+      expect(colMap.get('remaining_value')).toBe('double precision');
+
+      // 4. Verify existing data was preserved
+      const existingObs = await db.get<{ id: string; platform: string; created_at: string; observed_at: string; limit_value: number }>(`
+        SELECT id, platform, created_at, observed_at, limit_value
+          FROM provider_quota_observations
+         WHERE id = 'obs-legacy-1'
+      `);
+      expect(existingObs?.id).toBe('obs-legacy-1');
+      expect(existingObs?.platform).toBe('groq');
+      expect(existingObs?.limit_value).toBe(30);
+      expect(typeof existingObs?.created_at).toBe('string');
+      expect(typeof existingObs?.observed_at).toBe('string');
+      expect(existingObs?.created_at.length).toBeGreaterThan(0);
+
+      // 5. Verify indexes were created successfully
+      const idxs = await db.all<{ indexname: string }>(`
+        SELECT indexname
+          FROM pg_indexes
+         WHERE tablename = 'provider_quota_observations'
+      `);
+      const indexNames = new Set(idxs.map(i => i.indexname));
+      expect(indexNames.has('idx_provider_quota_observations_latest')).toBe(true);
+      expect(indexNames.has('idx_provider_quota_observations_created_at')).toBe(true);
+      expect(indexNames.has('idx_quota_balance_observations')).toBe(true);
+
+      // 6. Verify new full-schema observations can be inserted
+      await db.run(`
+        INSERT INTO provider_quota_observations (
+          id, platform, key_id, quota_pool_key, metric, limit_value, remaining_value,
+          reset_strategy, source, confidence, raw_json, endpoint, observed_at, created_at
+        ) VALUES (
+          'obs-new-1', 'groq', 1, 'groq-pool', 'requests', 30, 24,
+          'unknown', 'probe', 0.5, '{"test":true}', 'https://api.groq.com',
+          '2026-10-22 12:00:00', '2026-10-22 12:00:00'
+        )
+      `);
+
+      const totalCount = await db.get<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM provider_quota_observations');
+      expect(Number(totalCount?.cnt)).toBe(2);
+
+      // 7. Verify repeated migration run is completely idempotent
+      await runMigrations(db, 'up');
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
 
