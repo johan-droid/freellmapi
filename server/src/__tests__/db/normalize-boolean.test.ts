@@ -210,5 +210,78 @@ describe('normalizeLegacyBooleanColumns', () => {
       await cleanup();
     }
   });
+
+  it('handles existing api_keys table without sequence/identity default without crashing migrations', async () => {
+    const { db, cleanup } = await createEmptyTestDb();
+
+    try {
+      // Legacy schema where api_keys was created with BIGINT id WITHOUT identity or sequence default
+      await db.exec(`
+        CREATE TABLE providers (
+          id SERIAL PRIMARY KEY,
+          provider_key VARCHAR(64) UNIQUE NOT NULL,
+          display_name VARCHAR(128) NOT NULL
+        );
+        CREATE TABLE credentials (
+          id SERIAL PRIMARY KEY,
+          provider_id INTEGER NOT NULL REFERENCES providers(id),
+          credential_name VARCHAR(128) NOT NULL DEFAULT '',
+          encrypted_value TEXT NOT NULL,
+          iv VARCHAR(64) NOT NULL,
+          auth_tag VARCHAR(64) NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE api_keys (
+          id BIGINT NOT NULL PRIMARY KEY,
+          platform TEXT NOT NULL,
+          label TEXT NOT NULL DEFAULT '',
+          encrypted_key TEXT NOT NULL,
+          iv TEXT NOT NULL,
+          auth_tag TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unknown',
+          enabled BIGINT NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS')),
+          last_checked_at TEXT
+        );
+
+        INSERT INTO providers (provider_key, display_name) VALUES ('google', 'Google');
+        INSERT INTO credentials (provider_id, credential_name, encrypted_value, iv, auth_tag, enabled)
+        VALUES (1, 'Render Key', 'render_enc_key', 'render_iv', 'render_tag', true);
+      `);
+
+      // Verify api_keys.id has no default and is not identity
+      const idCol = await db.get<{ column_default: string | null; is_identity: string }>(`
+        SELECT column_default, is_identity
+          FROM information_schema.columns
+         WHERE table_name = 'api_keys' AND column_name = 'id'
+      `);
+      expect(idCol?.column_default).toBeNull();
+      expect(idCol?.is_identity).toBe('NO');
+
+      // Now run migrations - this must succeed and not crash!
+      await runMigrations(db, 'up');
+
+      // Verify sequence is attached and legacy credential was recovered
+      const recovered = await db.all<{ id: string | number; platform: string; encrypted_key: string }>(`
+        SELECT id, platform, encrypted_key FROM api_keys WHERE encrypted_key = 'render_enc_key'
+      `);
+      expect(recovered.length).toBe(1);
+      expect(Number(recovered[0].id)).toBeGreaterThan(0);
+
+      // Verify new keys can be inserted without specifying id
+      await db.run(`
+        INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag)
+        VALUES ('cerebras', 'Cerebras Key', 'c_enc', 'c_iv', 'c_tag')
+      `);
+      const newKey = await db.get<{ id: string | number }>(`
+        SELECT id FROM api_keys WHERE platform = 'cerebras'
+      `);
+      expect(Number(newKey?.id)).toBeGreaterThan(0);
+    } finally {
+      await cleanup();
+    }
+  });
 });
+
 
