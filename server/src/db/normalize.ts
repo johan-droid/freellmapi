@@ -23,6 +23,7 @@ export async function normalizeLegacySchema(db: Db): Promise<void> {
     await normalizeBooleanColumns(db);
     await normalizeLegacyModelsTable(db);
     await normalizeLegacyClientProfilesTable(db);
+    await normalizeLegacyPlaygroundConversationsTable(db);
     await recoverLegacyCredentials(db);
   } catch (err: any) {
     console.warn(`[db] note: legacy schema normalization check: ${err?.message ?? err}`);
@@ -386,6 +387,100 @@ async function normalizeLegacyClientProfilesTable(db: Db): Promise<void> {
            WHERE token_hash IS NULL AND api_key IS NOT NULL;
         `);
       }
+    }
+  }
+}
+
+async function normalizeLegacyPlaygroundConversationsTable(db: Db): Promise<void> {
+  const tableExists = await db.get<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+       WHERE table_schema = current_schema()
+         AND table_name = 'playground_conversations'
+    ) AS exists
+  `);
+  if (!tableExists?.exists) return;
+
+  const hasUpdatedAtMs = await db.get<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+       WHERE table_schema = current_schema()
+         AND table_name = 'playground_conversations'
+         AND column_name = 'updated_at_ms'
+    ) AS exists
+  `);
+
+  if (!hasUpdatedAtMs?.exists) {
+    console.log('[db] normalizing legacy playground_conversations table');
+    const count = await db.get<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM playground_conversations');
+    if (!count || Number(count.cnt) === 0) {
+      await db.exec('DROP TABLE playground_conversations;');
+    } else {
+      await db.exec(`
+        ALTER TABLE playground_conversations
+          ADD COLUMN IF NOT EXISTS messages_json TEXT NOT NULL DEFAULT '[]',
+          ADD COLUMN IF NOT EXISTS model TEXT,
+          ADD COLUMN IF NOT EXISTS system_prompt TEXT,
+          ADD COLUMN IF NOT EXISTS created_at_ms BIGINT,
+          ADD COLUMN IF NOT EXISTS updated_at_ms BIGINT;
+      `);
+
+      const cols = await db.all<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'playground_conversations'
+      `);
+      const colSet = new Set(cols.map(c => c.column_name));
+
+      if (colSet.has('messages')) {
+        await db.exec(`
+          UPDATE playground_conversations
+             SET messages_json = messages::text
+           WHERE (messages_json IS NULL OR messages_json = '[]') AND messages IS NOT NULL;
+        `);
+      }
+      if (colSet.has('model_id')) {
+        await db.exec(`
+          UPDATE playground_conversations
+             SET model = model_id
+           WHERE model IS NULL AND model_id IS NOT NULL;
+        `);
+      }
+      if (colSet.has('created_at')) {
+        await db.exec(`
+          UPDATE playground_conversations
+             SET created_at_ms = (EXTRACT(EPOCH FROM created_at) * 1000)::bigint
+           WHERE created_at_ms IS NULL AND created_at IS NOT NULL;
+        `);
+      }
+      if (colSet.has('updated_at')) {
+        await db.exec(`
+          UPDATE playground_conversations
+             SET updated_at_ms = (EXTRACT(EPOCH FROM updated_at) * 1000)::bigint
+           WHERE updated_at_ms IS NULL AND updated_at IS NOT NULL;
+        `);
+      }
+
+      await db.exec(`
+        UPDATE playground_conversations
+           SET created_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+         WHERE created_at_ms IS NULL;
+
+        UPDATE playground_conversations
+           SET updated_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+         WHERE updated_at_ms IS NULL;
+
+        ALTER TABLE playground_conversations
+          ALTER COLUMN created_at_ms SET NOT NULL,
+          ALTER COLUMN updated_at_ms SET NOT NULL;
+
+        ALTER TABLE playground_conversations
+          DROP COLUMN IF EXISTS messages,
+          DROP COLUMN IF EXISTS model_id,
+          DROP COLUMN IF EXISTS created_at,
+          DROP COLUMN IF EXISTS updated_at;
+      `);
     }
   }
 }

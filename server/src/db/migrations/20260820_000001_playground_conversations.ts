@@ -36,6 +36,44 @@ export async function up(db: Db): Promise<void> {
       updated_at_ms BIGINT NOT NULL
     );
 
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'playground_conversations'
+           AND column_name = 'updated_at_ms'
+      ) THEN
+        ALTER TABLE playground_conversations
+          ADD COLUMN IF NOT EXISTS messages_json TEXT NOT NULL DEFAULT '[]',
+          ADD COLUMN IF NOT EXISTS model TEXT,
+          ADD COLUMN IF NOT EXISTS system_prompt TEXT,
+          ADD COLUMN IF NOT EXISTS created_at_ms BIGINT,
+          ADD COLUMN IF NOT EXISTS updated_at_ms BIGINT;
+
+        UPDATE playground_conversations
+           SET created_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+         WHERE created_at_ms IS NULL;
+
+        UPDATE playground_conversations
+           SET updated_at_ms = (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+         WHERE updated_at_ms IS NULL;
+
+        ALTER TABLE playground_conversations
+          ALTER COLUMN created_at_ms SET NOT NULL,
+          ALTER COLUMN updated_at_ms SET NOT NULL;
+      END IF;
+    END $$;
+
+    -- Compatibility helper so json_array_length(messages_json) works on text in Postgres
+    CREATE OR REPLACE FUNCTION json_array_length(txt text) RETURNS integer AS $$
+    BEGIN
+      RETURN json_array_length(txt::json);
+    EXCEPTION WHEN OTHERS THEN
+      RETURN 0;
+    END;
+    $$ LANGUAGE plpgsql IMMUTABLE;
+
     -- The sidebar's only query: most recently touched first.
     CREATE INDEX IF NOT EXISTS idx_playground_conversations_updated
       ON playground_conversations(updated_at_ms DESC);
@@ -46,5 +84,6 @@ export async function down(db: Db): Promise<void> {
   await db.exec(`
     DROP INDEX IF EXISTS idx_playground_conversations_updated;
     DROP TABLE IF EXISTS playground_conversations;
+    DROP FUNCTION IF EXISTS json_array_length(text);
   `);
 }

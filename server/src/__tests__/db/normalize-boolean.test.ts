@@ -282,6 +282,127 @@ describe('normalizeLegacyBooleanColumns', () => {
       await cleanup();
     }
   });
+
+  it('normalizes legacy fork playground_conversations table and migrates data to updated_at_ms', async () => {
+    const { db, cleanup } = await createEmptyTestDb();
+
+    try {
+      // Legacy schema where playground_conversations had messages JSONB, model_id, created_at, updated_at
+      await db.exec(`
+        CREATE TABLE playground_conversations (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL DEFAULT 'New Conversation',
+          messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+          model_id VARCHAR(128),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        INSERT INTO playground_conversations (title, messages, model_id)
+        VALUES ('Legacy Conversation', '[{"role":"user","content":"hello world"}]'::jsonb, 'gemini-2.5-flash');
+      `);
+
+      // Verify the legacy columns exist and updated_at_ms does not exist
+      const beforeCols = await db.all<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_name = 'playground_conversations'
+      `);
+      const beforeColNames = new Set(beforeCols.map(c => c.column_name));
+      expect(beforeColNames.has('updated_at_ms')).toBe(false);
+      expect(beforeColNames.has('messages')).toBe(true);
+      expect(beforeColNames.has('model_id')).toBe(true);
+
+      // Now run migrations - should successfully migrate past 20260820_000001_playground_conversations.ts
+      await runMigrations(db, 'up');
+
+      // Verify table now has updated_at_ms and messages_json
+      const afterCols = await db.all<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_name = 'playground_conversations'
+      `);
+      const afterColNames = new Set(afterCols.map(c => c.column_name));
+      expect(afterColNames.has('updated_at_ms')).toBe(true);
+      expect(afterColNames.has('created_at_ms')).toBe(true);
+      expect(afterColNames.has('messages_json')).toBe(true);
+      expect(afterColNames.has('model')).toBe(true);
+
+      // Verify the legacy conversation was preserved and migrated
+      const row = await db.get<{
+        id: number | string;
+        title: string;
+        messages_json: string;
+        model: string;
+        created_at_ms: number | string;
+        updated_at_ms: number | string;
+      }>('SELECT id, title, messages_json, model, created_at_ms, updated_at_ms FROM playground_conversations WHERE title = ?', ['Legacy Conversation']);
+
+      expect(row).toBeDefined();
+      expect(row?.model).toBe('gemini-2.5-flash');
+      expect(row?.messages_json).toContain('hello world');
+      expect(Number(row?.created_at_ms)).toBeGreaterThan(0);
+      expect(Number(row?.updated_at_ms)).toBeGreaterThan(0);
+
+      // Verify index idx_playground_conversations_updated exists
+      const idx = await db.get<{ indexname: string }>(`
+        SELECT indexname FROM pg_indexes
+         WHERE tablename = 'playground_conversations'
+           AND indexname = 'idx_playground_conversations_updated'
+      `);
+      expect(idx?.indexname).toBe('idx_playground_conversations_updated');
+
+      // Verify new conversations can be inserted
+      const now = Date.now();
+      await db.run(`
+        INSERT INTO playground_conversations (title, messages_json, model, system_prompt, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, ['New Conversation', '[]', 'cerebras', null, now, now]);
+
+      const count = await db.get<{ cnt: number }>('SELECT COUNT(*) AS cnt FROM playground_conversations');
+      expect(Number(count?.cnt)).toBe(2);
+
+      // Verify repeated migration execution is completely idempotent
+      await runMigrations(db, 'up');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('handles empty legacy playground_conversations table cleanly and idempotently', async () => {
+    const { db, cleanup } = await createEmptyTestDb();
+
+    try {
+      await db.exec(`
+        CREATE TABLE playground_conversations (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL DEFAULT 'New Conversation',
+          messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+          model_id VARCHAR(128),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+
+      await runMigrations(db, 'up');
+
+      const afterCols = await db.all<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_name = 'playground_conversations'
+      `);
+      const afterColNames = new Set(afterCols.map(c => c.column_name));
+      expect(afterColNames.has('updated_at_ms')).toBe(true);
+      expect(afterColNames.has('created_at_ms')).toBe(true);
+      expect(afterColNames.has('messages_json')).toBe(true);
+
+      // Verify repeated migration execution is completely idempotent
+      await runMigrations(db, 'up');
+    } finally {
+      await cleanup();
+    }
+  });
 });
+
 
 
