@@ -148,11 +148,12 @@ describe('provider-quota: record + read round-trip', () => {
     const db = getDb();
     const now = Date.UTC(2026, 8, 1);
     const old = new Date(now - 60 * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
-    const tx = db.transaction(async () => { for (let i = 0; i < 45_000; i++) (await db.run(`
+    await db.run(`
       INSERT INTO provider_quota_observations
         (id, platform, key_id, quota_pool_key, metric, observed_at, created_at)
-      VALUES (?, 'groq', 7, 'groq::account', 'tokens', ?, ?) RETURNING id`, [`o-${i}`, old, old])); });
-    tx();
+      SELECT 'o-' || i, 'groq', 7, 'groq::account', 'tokens', ?, ?
+        FROM generate_series(0, 44999) i
+    `, [old, old]);
     // A zero budget allows exactly one chunk before the check trips.
     const first = await pruneQuotaObservations(db, now, 0);
     expect(first.done).toBe(false);
