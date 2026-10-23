@@ -25,7 +25,7 @@ describe('Router model scope (#657)', () => {
     }
   });
 
-  async function insertKey(platform: string, secret: string, scope: string[] | string | null): number {
+  async function insertKey(platform: string, secret: string, scope: string[] | string | null): Promise<number> {
     const db = getDb();
     const { encrypted, iv, authTag } = encrypt(secret);
     const scopeJson = scope == null ? null : typeof scope === 'string' ? scope : JSON.stringify(scope);
@@ -35,7 +35,7 @@ describe('Router model scope (#657)', () => {
     return Number(result.lastInsertRowid);
   }
 
-  async function googleModels(): { id: number; model_id: string }[] {
+  async function googleModels(): Promise<{ id: number; model_id: string }[]> {
     return (await getDb().all('SELECT id, model_id FROM models WHERE platform = ? AND enabled = 1 ORDER BY intelligence_rank ASC', ['google'])) as { id: number; model_id: string }[];
   }
 
@@ -44,7 +44,7 @@ describe('Router model scope (#657)', () => {
     const result = await routeRequest();
     expect(result.platform).toBe('google');
     expect(result.apiKey).toBe('unscoped-key');
-    expect(result.modelId).toBe(await googleModels()[0]!.model_id);
+    expect(result.modelId).toBe((await googleModels())[0]!.model_id);
   });
 
   it('excludes a model whose only key is scoped to other models', async () => {
@@ -69,16 +69,16 @@ describe('Router model scope (#657)', () => {
 
   it('treats an empty or corrupt stored scope as unscoped', async () => {
     await insertKey('google', 'empty-scope', '[]');
-    expect((await routeRequest()).modelId).toBe(await googleModels()[0]!.model_id);
+    expect((await routeRequest()).modelId).toBe((await googleModels())[0]!.model_id);
 
     (await getDb().run('DELETE FROM api_keys'));
     await insertKey('google', 'corrupt-scope', 'not json');
-    expect((await routeRequest()).modelId).toBe(await googleModels()[0]!.model_id);
+    expect((await routeRequest()).modelId).toBe((await googleModels())[0]!.model_id);
   });
 
   describe('hasOtherUsableKey', () => {
     it('does not count a sibling scoped away from the model', async () => {
-      const top = await googleModels()[0]!;
+      const top = (await googleModels())[0]!;
       const failedKeyId = await insertKey('google', 'failed-key', null);
       await insertKey('google', 'scoped-sibling', ['some-other-model']);
       // The only sibling can never serve this model, so the model IS exhausted
@@ -87,14 +87,14 @@ describe('Router model scope (#657)', () => {
     });
 
     it('counts a sibling whose scope includes the model', async () => {
-      const top = await googleModels()[0]!;
+      const top = (await googleModels())[0]!;
       const failedKeyId = await insertKey('google', 'failed-key', null);
       await insertKey('google', 'in-scope-sibling', [top.model_id]);
       expect(await hasOtherUsableKey(top.id, failedKeyId)).toBe(true);
     });
 
     it('counts an unscoped sibling (regression)', async () => {
-      const top = await googleModels()[0]!;
+      const top = (await googleModels())[0]!;
       const failedKeyId = await insertKey('google', 'failed-key', null);
       await insertKey('google', 'unscoped-sibling', null);
       expect(await hasOtherUsableKey(top.id, failedKeyId)).toBe(true);

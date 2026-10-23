@@ -26,7 +26,7 @@ describe('Router — per-key proxy override (#590)', () => {
     vi.restoreAllMocks();
   });
 
-  async function insertKey(proxyColumns: { encrypted: string | null; iv: string | null; authTag: string | null }): number {
+  async function insertKey(proxyColumns: { encrypted: string | null; iv: string | null; authTag: string | null }): Promise<number> {
     const db = getDb();
     const { encrypted, iv, authTag } = encrypt('sk-google-1');
     const result = (await db.run(`

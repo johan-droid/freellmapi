@@ -45,7 +45,7 @@ function catalogOf(models: AnyCatalog['models']): AnyCatalog {
 }
 
 /** Snapshot every catalog-owned model as catalog entries so applyCatalog keeps them. */
-async function existingAsCatalogModels(): AnyCatalog['models'] {
+async function existingAsCatalogModels(): Promise<AnyCatalog['models']> {
   const rows = (await getDb().all(`SELECT platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
               rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window,
               enabled, supports_vision, supports_tools
@@ -73,7 +73,7 @@ async function existingAsCatalogModels(): AnyCatalog['models'] {
   );
 }
 
-async function modelRow(platform: string, modelId: string): { id: number; display_name: string; source: string } | undefined {
+async function modelRow(platform: string, modelId: string): Promise<{ id: number; display_name: string; source: string } | undefined> {
   return (await getDb().get('SELECT id, display_name, source FROM models WHERE platform = ? AND model_id = ?', [platform, modelId])) as { id: number; display_name: string; source: string } | undefined;
 }
 

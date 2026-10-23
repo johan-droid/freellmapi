@@ -7,7 +7,7 @@ import { initTestDb } from '../helpers/test-db.js';
 
 const realFetch = globalThis.fetch;
 
-async function addKey(platform: string, raw = `${platform}-test-key`): number {
+async function addKey(platform: string, raw = `${platform}-test-key`): Promise<number> {
   const { encrypted, iv, authTag } = encrypt(raw);
   const row = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
@@ -22,7 +22,7 @@ function jsonResponse(body: unknown, status = 200) {
 /** Seed the catalog-delivered STT registry (media_models, modality
  *  'transcription') exactly as the published `transcriptionModels` fragment
  *  would land it via catalog-sync. */
-async function seedTranscriptionModels(): void {
+async function seedTranscriptionModels(): Promise<void> {
   (await getDb().run(`
     INSERT INTO media_models (platform, model_id, display_name, modality, priority, enabled, quota_label, meta_json)
     VALUES (?, ?, ?, 'transcription', ?, 1, '', ?) RETURNING id`, ['groq', 'whisper-large-v3-turbo', 'Whisper Large v3 Turbo (Groq)', 0, JSON.stringify({ maxBytes: 25 * 1024 * 1024 })]));
@@ -124,7 +124,7 @@ describe('transcription service', () => {
   it('groq: requests verbose_json upstream and passes segments through', async () => {
     await addKey('groq');
     const segments = [{ id: 0, start: 0, end: 1.5, text: 'hello' }];
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
       jsonResponse({ text: 'hello', language: 'en', duration: 1.5, segments }));
     globalThis.fetch = fetchMock as any;
 
@@ -217,7 +217,7 @@ describe('transcription service', () => {
   it('vtt restricts the chain to natively capable providers (cloudflare)', async () => {
     await addKey('groq');
     await addKey('cloudflare', 'acct123:token456');
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
       jsonResponse({ result: { text: 'x', vtt: 'WEBVTT\n\n00:00.000 --> 00:01.000\nx' }, success: true }));
     globalThis.fetch = fetchMock as any;
 
@@ -256,7 +256,7 @@ describe('transcription service', () => {
   // is bound to one api_keys row that carries the base_url —
   // getProviderCredential refuses to guess a key for 'custom', so the
   // candidate MUST carry key_id or the row is silently skipped.
-  async function addCustomStt(model = 'local-whisper', secret = 'stt-secret', baseUrl = 'http://127.0.0.1:9911/v1'): number {
+  async function addCustomStt(model = 'local-whisper', secret = 'stt-secret', baseUrl = 'http://127.0.0.1:9911/v1'): Promise<number> {
     const { encrypted, iv, authTag } = encrypt(secret);
     const key = (await getDb().run(`
       INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
@@ -313,7 +313,7 @@ describe('transcription service', () => {
   it('custom: verbose_json is asked for upstream and segments pass through', async () => {
     await addCustomStt();
     const segments = [{ id: 0, start: 0, end: 1, text: 'local text' }];
-    const fetchMock = vi.fn(async () => jsonResponse({ text: 'local text', segments }));
+    const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ text: 'local text', segments }));
     globalThis.fetch = fetchMock as any;
 
     const r = await runTranscription('local-whisper', params({ responseFormat: 'verbose_json' }));

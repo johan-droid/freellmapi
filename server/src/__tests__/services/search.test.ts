@@ -18,7 +18,7 @@ import { initTestDb } from '../helpers/test-db.js';
 
 const realFetch = globalThis.fetch;
 
-async function addKey(platform: string, raw = `${platform}-test-key`): number {
+async function addKey(platform: string, raw = `${platform}-test-key`): Promise<number> {
   const { encrypted, iv, authTag } = encrypt(raw);
   const row = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
@@ -26,7 +26,7 @@ async function addKey(platform: string, raw = `${platform}-test-key`): number {
   return Number(row.lastInsertRowid);
 }
 
-async function addCustomRelay(baseUrl: string, engineId = 'my-relay'): number {
+async function addCustomRelay(baseUrl: string, engineId = 'my-relay'): Promise<number> {
   const { encrypted, iv, authTag } = encrypt('relay-key');
   const key = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
@@ -133,7 +133,7 @@ describe('search service', () => {
   });
 
   describe('Parallel (keyless)', () => {
-    async function seedParallel(): void {
+    async function seedParallel(): Promise<void> {
       (await getDb().run(`
         INSERT INTO media_models (platform, model_id, display_name, modality, priority, enabled, quota_label, meta_json)
         VALUES ('parallel', 'parallel-search', 'Parallel Search', 'search', 4, 1, 'Free, no key needed', '{}') RETURNING id`));

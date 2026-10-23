@@ -29,17 +29,17 @@ async function request(method: string, path: string, body?: any) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch(() => null);
+  const data: any = await res.json().catch(() => null);
   server.close();
   return { status: res.status, body: data };
 }
 
-async function activeProfileId(): number {
+async function activeProfileId(): Promise<number> {
   const row = (await getDb().get("SELECT value FROM settings WHERE key = 'active_profile_id'")) as { value: string };
   return Number(row.value);
 }
 
-async function addKey(platform: string, label = 'routing-test'): number {
+async function addKey(platform: string, label = 'routing-test'): Promise<number> {
   const secret = encrypt(`${platform}-${label}-routing-test-key`);
   const inserted = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
@@ -49,7 +49,7 @@ async function addKey(platform: string, label = 'routing-test'): number {
 
 // A key on a custom endpoint, identified by its base_url (the endpoint IS the
 // url; several credentials may share it — see services/custom-endpoint.ts).
-async function addCustomKey(baseUrl: string, label: string): number {
+async function addCustomKey(baseUrl: string, label: string): Promise<number> {
   const secret = encrypt(`${label}-custom-secret`);
   const inserted = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
@@ -58,7 +58,7 @@ async function addCustomKey(baseUrl: string, label: string): number {
 }
 
 /** Wipe the chain so a test routes over exactly the models it seeds. */
-async function clearChain(): void {
+async function clearChain(): Promise<void> {
   const db = getDb();
   (await db.run('DELETE FROM fallback_config'));
   (await db.run('DELETE FROM profile_models'));
@@ -67,7 +67,7 @@ async function clearChain(): void {
 }
 
 /** A key's observed quota, as the provider would have reported it in headers. */
-async function observeQuota(platform: string, keyId: number, pool: string, remaining: number, limit = 1000): void {
+async function observeQuota(platform: string, keyId: number, pool: string, remaining: number, limit = 1000): Promise<void> {
   await recordQuotaObservation({
     platform: platform as any,
     keyId,
@@ -85,7 +85,7 @@ async function addSyntheticModel(
   enabled = true,
   platform = 'groq',
   keyId: number | null = null,
-): number {
+): Promise<number> {
   const db = getDb();
   const inserted = (await db.run(`
     INSERT INTO models (

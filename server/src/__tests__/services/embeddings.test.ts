@@ -14,7 +14,7 @@ async function addKey(platform: string, raw = `${platform}-test-key`) {
     VALUES (?, 'test', ?, ?, ?, 'healthy', 1) RETURNING id`, [platform, encrypted, iv, authTag]));
 }
 
-async function addCustomKey(baseUrl: string, raw = 'custom-test-key'): number {
+async function addCustomKey(baseUrl: string, raw = 'custom-test-key'): Promise<number> {
   const { encrypted, iv, authTag } = encrypt(raw);
   const row = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)

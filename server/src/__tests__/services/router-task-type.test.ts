@@ -30,7 +30,7 @@ const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 async function addModel(opts: {
   platform: string; modelId: string; name: string;
   intelligenceRank: number; speedRank: number; sizeLabel: string; budget: string; priority: number;
-}): number {
+}): Promise<number> {
   const db = getDb();
   (await db.run(`
     INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, monthly_token_budget, enabled, supports_vision, supports_tools)
@@ -60,7 +60,7 @@ async function addHistory(platform: string, modelId: string, opts: {
   }
 }
 
-async function pickCounts(runs: number, task?: 'code' | 'chat'): Record<string, number> {
+async function pickCounts(runs: number, task?: 'code' | 'chat'): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (let i = 0; i < runs; i++) {
     const r = await routeRequest(100, undefined, undefined, false, false, undefined, undefined, false, undefined, 0, task);

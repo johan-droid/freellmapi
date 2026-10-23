@@ -23,19 +23,19 @@ vi.mock('../../lib/crypto.js', async () => {
 
 const ORIGINAL_INTERVAL = process.env.CUSTOM_MODEL_SYNC_INTERVAL_MS;
 
-async function addCustomEndpoint(baseUrl: string, label = 'endpoint'): void {
+async function addCustomEndpoint(baseUrl: string, label = 'endpoint'): Promise<void> {
   (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
     VALUES ('custom', ?, 'enc', 'iv', 'tag', 'healthy', 1, ?) RETURNING id`, [label, baseUrl]));
 }
 
-async function addDisabledCustomEndpoint(baseUrl: string, label = 'disabled-endpoint'): void {
+async function addDisabledCustomEndpoint(baseUrl: string, label = 'disabled-endpoint'): Promise<void> {
   (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
     VALUES ('custom', ?, 'enc', 'iv', 'tag', 'healthy', 0, ?) RETURNING id`, [label, baseUrl]));
 }
 
-async function customModelIds(): string[] {
+async function customModelIds(): Promise<string[]> {
   const rows = (await getDb().all("SELECT model_id FROM models WHERE platform = 'custom'")) as { model_id: string }[];
   return rows.map(r => r.model_id).sort();
 }

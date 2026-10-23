@@ -73,7 +73,7 @@ async function pickKeyCounts(runs: number): Promise<Record<number, number>> {
   for (let i = 0; i < runs; i++) {
     const r = await routeRequest(100);
     counts[r.keyId] = (counts[r.keyId] ?? 0) + 1;
-    r.release();
+    r.release?.();
   }
   return counts;
 }

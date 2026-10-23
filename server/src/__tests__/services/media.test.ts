@@ -13,7 +13,7 @@ async function addKey(platform: string, raw = `${platform}-test-key`) {
     VALUES (?, 'test', ?, ?, ?, 'healthy', 1) RETURNING id`, [platform, encrypted, iv, authTag]));
 }
 
-async function addCustomKey(baseUrl: string, raw = 'custom-media-key'): number {
+async function addCustomKey(baseUrl: string, raw = 'custom-media-key'): Promise<number> {
   const { encrypted, iv, authTag } = encrypt(raw);
   const row = (await getDb().run(`
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, base_url)
@@ -142,7 +142,7 @@ describe('media service', () => {
     it('NVIDIA FLUX.1 Dev: sends the validated 28-step 1024x1024 payload', async () => {
       await addMedia('nvidia', 'black-forest-labs/flux.1-dev', 'image');
       await addKey('nvidia');
-      const fetchMock = vi.fn(async () => jsonResponse({ artifacts: [{ base64: 'DEV' }] }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ artifacts: [{ base64: 'DEV' }] }));
       globalThis.fetch = fetchMock as any;
 
       await runImageGeneration('black-forest-labs/flux.1-dev', {
@@ -164,7 +164,7 @@ describe('media service', () => {
     it('NVIDIA FLUX.2 Klein 4B: omits unsupported mode and guidance fields', async () => {
       await addMedia('nvidia', 'black-forest-labs/flux.2-klein-4b', 'image');
       await addKey('nvidia');
-      const fetchMock = vi.fn(async () => jsonResponse({ artifacts: [{ base64: 'KLEIN' }] }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ artifacts: [{ base64: 'KLEIN' }] }));
       globalThis.fetch = fetchMock as any;
 
       await runImageGeneration('black-forest-labs/flux.2-klein-4b', {
@@ -191,7 +191,7 @@ describe('media service', () => {
     it('Cloudflare FLUX.1 Schnell: sends only the prompt and maps result.image', async () => {
       await addMedia('cloudflare', '@cf/black-forest-labs/flux-1-schnell', 'image');
       await addKey('cloudflare', 'acct123:token456');
-      const fetchMock = vi.fn(async () => jsonResponse({ result: { image: 'CFB64' }, success: true }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ result: { image: 'CFB64' }, success: true }));
       globalThis.fetch = fetchMock as any;
       const r = await runImageGeneration('@cf/black-forest-labs/flux-1-schnell', { prompt: 'x' });
       expect(r.images[0].b64_json).toBe('CFB64');
@@ -204,7 +204,7 @@ describe('media service', () => {
       await addMedia('cloudflare', '@cf/black-forest-labs/flux-2-klein-4b', 'image', 1, null,
         JSON.stringify({ requestStyle: 'multipart' }));
       await addKey('cloudflare', 'acct123:token456');
-      const fetchMock = vi.fn(async () => jsonResponse({ result: { image: 'KLEINB64' }, success: true }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ result: { image: 'KLEINB64' }, success: true }));
       globalThis.fetch = fetchMock as any;
       const r = await runImageGeneration('@cf/black-forest-labs/flux-2-klein-4b', {
         prompt: 'a small blue square',
@@ -274,7 +274,7 @@ describe('media service', () => {
     it('custom image models call the bound OpenAI-compatible endpoint', async () => {
       const keyId = await addCustomKey('http://127.0.0.1:8282/v1', 'custom-image-key');
       await addMedia('custom', 'local-image', 'image', 1, keyId);
-      const fetchMock = vi.fn(async () => jsonResponse({ data: [{ url: 'https://example.test/image.png' }] }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ data: [{ url: 'https://example.test/image.png' }] }));
       globalThis.fetch = fetchMock as any;
 
       const r = await runImageGeneration('local-image', { prompt: 'a cat', n: 2, size: '512x512' });
@@ -296,7 +296,7 @@ describe('media service', () => {
     it('Pollinations: sends the authenticated nova-reel request and returns MP4 bytes', async () => {
       await addMedia('pollinations', 'nova-reel', 'video');
       await addKey('pollinations', 'sk_pollinations_test');
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
         new Response(Buffer.from('MP4DATA'), { status: 200, headers: { 'content-type': 'video/mp4' } }));
       globalThis.fetch = fetchMock as any;
 
@@ -326,7 +326,7 @@ describe('media service', () => {
       // roster. No duration means the provider uses the model's own default.
       await addMedia('pollinations', 'nova-reel', 'video');
       await addKey('pollinations', 'sk_pollinations_test');
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
         new Response(Buffer.from('MP4DATA'), { status: 200, headers: { 'content-type': 'video/mp4' } }));
       globalThis.fetch = fetchMock as any;
 
@@ -366,7 +366,7 @@ describe('media service', () => {
       const submitUrl = 'https://router.huggingface.co/fal-ai/fal-ai/ltx-video-v095?_subdomain=queue';
       const jobUrl = 'https://router.huggingface.co/fal-ai/fal-ai/ltx-video-v095/requests/job-1?_subdomain=queue';
       const statusUrl = 'https://router.huggingface.co/fal-ai/fal-ai/ltx-video-v095/requests/job-1/status?_subdomain=queue';
-      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
         const url = String(input);
         if (url === submitUrl) {
           return jsonResponse({
@@ -586,7 +586,7 @@ describe('media service', () => {
     it('Cloudflare MeloTTS: base64 audio → audio/mpeg bytes', async () => {
       await addMedia('cloudflare', '@cf/myshell-ai/melotts', 'audio');
       await addKey('cloudflare', 'acct:tok');
-      const fetchMock = vi.fn(async () => jsonResponse({ result: { audio: Buffer.from('MP3').toString('base64') } }));
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({ result: { audio: Buffer.from('MP3').toString('base64') } }));
       globalThis.fetch = fetchMock as any;
       const r = await runSpeech('@cf/myshell-ai/melotts', { input: 'hi', voice: 'alloy' });
       expect(r.contentType).toBe('audio/mpeg');
@@ -598,7 +598,7 @@ describe('media service', () => {
     it('SiliconFlow CosyVoice: maps OpenAI voices, accepts native names, and defaults unknown names', async () => {
       await addMedia('siliconflow', 'FunAudioLLM/CosyVoice2-0.5B', 'audio');
       await addKey('siliconflow');
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
         new Response(Buffer.from('COSY'), { status: 200, headers: { 'content-type': 'audio/mpeg' } }));
       globalThis.fetch = fetchMock as any;
       const r = await runSpeech('FunAudioLLM/CosyVoice2-0.5B', { input: 'hi', voice: 'nova' });
@@ -618,7 +618,7 @@ describe('media service', () => {
 
     it('Pollinations openai-audio: keeps OpenAI voices and defaults unknown names (keyless)', async () => {
       await addMedia('pollinations', 'openai-audio', 'audio');
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
         jsonResponse({ choices: [{ message: { audio: { data: Buffer.from('POLLY').toString('base64') } } }] }));
       globalThis.fetch = fetchMock as any;
       const r = await runSpeech('openai-audio', { input: 'hi', voice: 'shimmer' });
@@ -634,7 +634,7 @@ describe('media service', () => {
       await addMedia('google', 'gemini-2.5-flash-preview-tts', 'audio');
       await addKey('google');
       const pcm = Buffer.from([1, 2, 3, 4]);
-      const fetchMock = vi.fn(async () => jsonResponse({
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({
         candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: pcm.toString('base64') } }] } }],
       }));
       globalThis.fetch = fetchMock as any;
@@ -673,7 +673,7 @@ describe('media service', () => {
       await addMedia('google', 'gemini-2.5-flash-preview-tts', 'audio');
       await addKey('google');
       const pcm = Buffer.from([1, 2]);
-      const fetchMock = vi.fn(async () => jsonResponse({
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) => jsonResponse({
         candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: pcm.toString('base64') } }] } }],
       }));
       globalThis.fetch = fetchMock as any;
@@ -694,7 +694,7 @@ describe('media service', () => {
       await addMedia('google', 'gemini-2.5-flash-preview-tts', 'audio', 2);
       await addKey('google');
       const pcm = Buffer.from([1, 2]);
-      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
         if (String(url).includes('cloudflare.com')) {
           return new Response('temporarily unavailable', { status: 503 });
         }
@@ -716,7 +716,7 @@ describe('media service', () => {
     it('custom audio models call the bound OpenAI-compatible endpoint', async () => {
       const keyId = await addCustomKey('http://127.0.0.1:8383/v1', 'custom-audio-key');
       await addMedia('custom', 'local-tts', 'audio', 1, keyId);
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url?: any, _init?: any) =>
         new Response(Buffer.from('MP3'), { status: 200, headers: { 'content-type': 'audio/mpeg' } })) as any;
       globalThis.fetch = fetchMock as any;
 

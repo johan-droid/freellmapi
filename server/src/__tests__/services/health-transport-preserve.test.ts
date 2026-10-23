@@ -35,7 +35,7 @@ describe('transport errors do not demote a key', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  async function seedKey(status: string): number {
+  async function seedKey(status: string): Promise<number> {
     const id = ++nextId;
     const enc = encrypt(`health-preserve-${id}`);
     (await getDb().run(`
@@ -44,7 +44,7 @@ describe('transport errors do not demote a key', () => {
     return id;
   }
 
-  async function statusOf(id: number): string {
+  async function statusOf(id: number): Promise<string> {
     return ((await getDb().get('SELECT status FROM api_keys WHERE id = ?', [id])) as { status: string }).status;
   }
 
@@ -95,7 +95,7 @@ describe('markKeyHealthyFromRequest', () => {
     await initTestDb();
   });
 
-  async function seedKey(status: string): number {
+  async function seedKey(status: string): Promise<number> {
     const id = ++nextId;
     const enc = encrypt(`heal-${id}`);
     (await getDb().run(`
@@ -104,7 +104,7 @@ describe('markKeyHealthyFromRequest', () => {
     return id;
   }
 
-  async function row(id: number): { status: string; last_health_error: string | null } {
+  async function row(id: number): Promise<{ status: string; last_health_error: string | null }> {
     return (await getDb().get('SELECT status, last_health_error FROM api_keys WHERE id = ?', [id])) as any;
   }
 

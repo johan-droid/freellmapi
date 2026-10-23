@@ -45,12 +45,12 @@ function jsonResponse(payload: unknown, status = 200) {
 }
 
 function stubRelay(payload: unknown, status = 200) {
-  const mock = vi.fn(async () => jsonResponse(payload, status));
+  const mock = vi.fn(async (_url?: any, _init?: any) => jsonResponse(payload, status));
   globalThis.fetch = mock as any;
   return mock;
 }
 
-async function customKeyIds(baseUrl = ENDPOINT): number[] {
+async function customKeyIds(baseUrl = ENDPOINT): Promise<number[]> {
   return ((await getDb().all("SELECT id FROM api_keys WHERE platform = 'custom' AND base_url = ? ORDER BY id", [baseUrl])) as { id: number }[]).map(r => r.id);
 }
 
@@ -210,10 +210,10 @@ describe('bulk registration of discovered models (#488)', () => {
     expect(body.alreadyRegistered).toBe(1);
 
     // relay-a keeps its original binding; the new ones bind to the submitted key.
-    expect(await chatModel('relay-a')!.key_id).toBe(firstKeyId);
-    expect(await chatModel('relay-b')!.key_id).toBe(secondKeyId);
-    expect(await chatModel('relay-c')!.key_id).toBe(secondKeyId);
-    expect(await chatModel('relay-b')!.source).toBe('user');
+    expect((await chatModel('relay-a'))!.key_id).toBe(firstKeyId);
+    expect((await chatModel('relay-b'))!.key_id).toBe(secondKeyId);
+    expect((await chatModel('relay-c'))!.key_id).toBe(secondKeyId);
+    expect((await chatModel('relay-b'))!.source).toBe('user');
   });
 
   it('does not duplicate a model that is already registered', async () => {
@@ -274,7 +274,7 @@ describe('median seeding for custom models (#488)', () => {
   it('seeds a bulk-registered custom model at the catalog median', async () => {
     await post(app, '/api/keys/custom', { baseUrl: ENDPOINT, models: ['relay-a', 'relay-b'], apiKey: 'k' });
     for (const id of ['relay-a', 'relay-b']) {
-      const row = await chatModel(id)!;
+      const row = (await chatModel(id))!;
       expect(row.size_label).toBe('Large');
       expect(row.intelligence_rank).toBe(10);
       expect(row.speed_rank).toBe(3);
@@ -283,7 +283,7 @@ describe('median seeding for custom models (#488)', () => {
 
   it('seeds a singly-added custom model the same way', async () => {
     await post(app, '/api/keys/custom', { baseUrl: ENDPOINT, model: 'relay-solo', apiKey: 'k' });
-    const row = await chatModel('relay-solo')!;
+    const row = (await chatModel('relay-solo'))!;
     expect(row.size_label).toBe('Large');
     expect(row.intelligence_rank).toBe(10);
     expect(row.speed_rank).toBe(3);
@@ -291,14 +291,14 @@ describe('median seeding for custom models (#488)', () => {
 
   it('never overwrites ranks the operator has since tuned', async () => {
     await post(app, '/api/keys/custom', { baseUrl: ENDPOINT, model: 'relay-a', apiKey: 'k' });
-    const modelDbId = await chatModel('relay-a')!.id;
+    const modelDbId = (await chatModel('relay-a'))!.id;
     (await getDb().run('UPDATE models SET intelligence_rank = 1, speed_rank = 1, size_label = ? WHERE id = ?', ['Frontier', modelDbId]));
 
     await post(app, '/api/keys/custom', { baseUrl: ENDPOINT, models: ['relay-a', 'relay-b'], apiKey: 'k' });
 
-    const kept = await chatModel('relay-a')!;
+    const kept = (await chatModel('relay-a'))!;
     expect([kept.intelligence_rank, kept.speed_rank, kept.size_label]).toEqual([1, 1, 'Frontier']);
-    expect(await chatModel('relay-b')!.size_label).toBe('Large');
+    expect((await chatModel('relay-b'))!.size_label).toBe('Large');
   });
 
   it('probe fires one chat request at the REGISTERED model and records a success sample (#685 follow-up)', async () => {
@@ -387,7 +387,7 @@ describe('median seeding for custom models (#488)', () => {
     (await getDb().run("DELETE FROM fallback_config WHERE model_db_id IN (SELECT id FROM models WHERE platform = 'custom')"));
     (await getDb().run("DELETE FROM models WHERE platform = 'custom'"));
 
-    const mock = vi.fn(async (url: string) => {
+    const mock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (String(url).endsWith('/models')) {
         return jsonResponse({ object: 'list', data: [{ id: 'relay-b', owned_by: 'acme' }] });
       }
@@ -416,7 +416,7 @@ describe('median seeding for custom models (#488)', () => {
     const keyId = (await customKeyIds())[0]!;
     setCooldown('custom', 'relay-a', keyId, 60_000);
 
-    const mock = vi.fn(async (url: string) => {
+    const mock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (String(url).endsWith('/models')) {
         return jsonResponse({ object: 'list', data: [{ id: 'relay-a' }] });
       }
@@ -568,8 +568,8 @@ describe('median seeding for custom models (#488)', () => {
     const OTHER_ENDPOINT = 'http://127.0.0.1:18098/v1';
     await post(app, '/api/keys/custom', { baseUrl: ENDPOINT, model: 'shared-model', apiKey: 'relay-secret' });
     await post(app, '/api/keys/custom', { baseUrl: OTHER_ENDPOINT, model: 'shared-model', apiKey: 'other-secret' });
-    const probedKeyId = await customKeyIds(ENDPOINT)[0]!;
-    const otherKeyId = await customKeyIds(OTHER_ENDPOINT)[0]!;
+    const probedKeyId = (await customKeyIds(ENDPOINT))[0]!;
+    const otherKeyId = (await customKeyIds(OTHER_ENDPOINT))[0]!;
     (await getDb().run("UPDATE models SET supports_tools = 0 WHERE platform = 'custom' AND model_id = 'shared-model'"));
 
     const mock = vi.fn(async (url: string, init?: RequestInit) => {

@@ -135,7 +135,7 @@ describe('enable_mcp default seed (#925)', () => {
     (await db.run('DELETE FROM api_keys'));
   });
 
-  async function stored(): string | undefined {
+  async function stored(): Promise<string | undefined> {
     const row = (await getDb().get("SELECT value FROM settings WHERE key = 'enable_mcp'")) as { value: string } | undefined;
     return row?.value;
   }
