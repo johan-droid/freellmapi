@@ -4,11 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <script>
       try {
         // Mirrors the ThemeProvider's resolution: 'system' (or nothing stored)
         // follows the OS preference. Keep in sync with src/theme.tsx.
         const theme = localStorage.getItem('theme')
+        const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]')
+        if (colorSchemeMeta) {
+          colorSchemeMeta.content = theme === 'dark' || theme === 'light' ? theme : 'light dark'
+        }
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
         const dark = theme === 'dark' || (theme !== 'light' && prefersDark)
         if (dark) {

@@ -103,7 +103,12 @@ export function PeakHoursControls({ routing, strategy, saving, onSave }: {
             aria-label={t('strategies.peakTimezoneLabel')}
             onChange={e => setTz(e.target.value)}
             onBlur={e => commitTimezone(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commitTimezone((e.target as HTMLInputElement).value) }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                if (e.isComposing || e.keyCode === 229) return
+                commitTimezone((e.target as HTMLInputElement).value)
+              }
+            }}
             className={`w-40 rounded-lg border bg-card px-1.5 py-0.5 outline-none focus:border-foreground/30 ${tzError ? 'border-destructive' : ''}`}
           />
           <button

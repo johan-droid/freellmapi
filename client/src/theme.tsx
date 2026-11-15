@@ -36,6 +36,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // The desktop preload mirrors this attribute to the Electron main process
     // so nativeTheme.themeSource can follow a 'system' choice for real.
     document.documentElement.dataset.themeChoice = theme
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]')
+    if (meta) {
+      meta.content = theme === 'dark' || theme === 'light' ? theme : 'light dark'
+    }
   }, [theme])
 
   useEffect(() => {

@@ -87,6 +87,7 @@ export function ModelScopeDialog({
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter') {
+                if (e.isComposing || e.keyCode === 229) return
                 e.preventDefault()
                 add(draft)
               }

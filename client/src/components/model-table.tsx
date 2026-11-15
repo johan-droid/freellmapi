@@ -318,7 +318,10 @@ export function RankEditor({ rank, onMoveRank }: { rank: number; onMoveRank: (to
         onBlur={commit}
         onKeyDown={e => {
           e.stopPropagation()
-          if (e.key === 'Enter') commit()
+          if (e.key === 'Enter') {
+            if (e.isComposing || e.keyCode === 229) return
+            commit()
+          }
           if (e.key === 'Escape') cancel()
         }}
         aria-label={t('models.moveToRank')}

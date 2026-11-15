@@ -330,7 +330,13 @@ export default function ModelDetailPage() {
                 <Input
                   value={aliasInput}
                   onChange={e => setAliasInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitAlias() } }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      if (e.isComposing || e.keyCode === 229) return
+                      e.preventDefault()
+                      submitAlias()
+                    }
+                  }}
                   placeholder="custom:my-alias"
                   className="font-mono text-xs"
                   aria-label={t('models.aliasMergeHeading')}

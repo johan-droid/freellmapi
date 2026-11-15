@@ -53,6 +53,15 @@
 }
 
 :root {
+    color-scheme: light dark;
+
+    &:has(> head > meta[name="color-scheme"][content="dark"]) {
+        color-scheme: dark;
+    }
+    &:has(> head > meta[name="color-scheme"][content="light"]) {
+        color-scheme: light;
+    }
+
     --background: oklch(0.995 0 0);
     --foreground: oklch(0.18 0 0);
     --card: oklch(1 0 0);

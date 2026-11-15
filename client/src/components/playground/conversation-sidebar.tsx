@@ -161,7 +161,11 @@ export function ConversationSidebar({
                         onChange={e => setDraft(e.target.value)}
                         onBlur={commitRename}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                          if (e.key === 'Enter') {
+                            if (e.isComposing || e.keyCode === 229) return
+                            e.preventDefault()
+                            commitRename()
+                          }
                           if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null) }
                         }}
                         aria-label={t('playgroundSessions.renamePlaceholder')}
